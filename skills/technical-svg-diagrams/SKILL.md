@@ -188,7 +188,7 @@ After creating the SVG, convert to WebP for universal compatibility.
 **Using uv (cross-platform, recommended):**
 ```bash
 uvx --from cairosvg cairosvg diagram.svg -o diagram.png --output-width 1600
-uvx --from pillow-cli pillow convert diagram.png diagram.webp
+uvx --with pillow python -c "from PIL import Image; Image.open('diagram.png').save('diagram.webp', 'WEBP', quality=90)"
 rm diagram.png
 ```
 
