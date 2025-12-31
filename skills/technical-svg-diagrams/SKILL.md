@@ -179,3 +179,30 @@ Diagram is complete when:
 - [ ] Bottom summary note included
 - [ ] SVG is valid and renders correctly
 </success_criteria>
+
+<export_to_webp>
+## Convert SVG to WebP
+
+After creating the SVG, convert to WebP for universal compatibility.
+
+**Using uv (cross-platform, recommended):**
+```bash
+uvx --from cairosvg cairosvg diagram.svg -o diagram.png --output-width 1600
+uvx --from pillow-cli pillow convert diagram.png diagram.webp
+rm diagram.png
+```
+
+**Alternative tools (if available):**
+```bash
+# ImageMagick
+convert -background none -density 150 diagram.svg diagram.webp
+
+# librsvg + cwebp
+rsvg-convert -w 1600 diagram.svg -o diagram.png && cwebp diagram.png -o diagram.webp
+```
+
+**Platform notes:**
+- macOS: `brew install cairo` if cairosvg fails
+- Linux: `apt install libcairo2-dev` if needed
+- Windows: uv works natively; or use WSL for other tools
+</export_to_webp>
