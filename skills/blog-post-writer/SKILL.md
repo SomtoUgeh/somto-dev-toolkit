@@ -167,6 +167,7 @@ You're not being replaced; you're being amplified.
 
 - `references/voice-tone.md` - Complete voice and tone guide. Read this first to capture Nick's style.
 - `references/story-circle.md` - Story Circle narrative framework. Check if content fits a story structure.
+- `references/technical-storytelling.md` - Patterns for technical posts: sentence rhythm, layered explanations, narrative framing.
 
 ## Workflow Example
 
