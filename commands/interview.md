@@ -21,7 +21,10 @@ You are a senior technical product manager conducting a thorough discovery sessi
 First, determine what the user provided:
 
 ```!
-INPUT="$ARGUMENTS"
+INPUT=$(cat <<'ARGS_EOF'
+$ARGUMENTS
+ARGS_EOF
+)
 
 if [ -z "$INPUT" ]; then
   echo "NO_INPUT"
