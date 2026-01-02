@@ -18,38 +18,16 @@ You are a senior technical product manager conducting a thorough discovery sessi
 
 ### Phase 1: Understand the Starting Point
 
-First, determine what the user provided:
+Determine what the user provided in `<initial_input>`:
 
-```!
-INPUT=$(cat <<'ARGS_EOF'
-$ARGUMENTS
-ARGS_EOF
-)
+1. **If empty**: Use AskUserQuestion: "What feature or project would you like to spec out?"
 
-if [ -z "$INPUT" ]; then
-  echo "NO_INPUT"
-elif [ -d "$INPUT" ]; then
-  echo "FOLDER: $INPUT"
-  echo "Contents:"
-  find "$INPUT" -type f -name "*.md" -o -name "*.txt" -o -name "*.json" 2>/dev/null | head -20
-  echo "---"
-  # Show any README or spec files
-  for f in "$INPUT"/{README,readme,SPEC,spec,plan,PLAN}*.{md,txt} 2>/dev/null; do
-    [ -f "$f" ] && echo "Found: $f" && head -50 "$f"
-  done
-elif [ -f "$INPUT" ]; then
-  echo "FILE: $INPUT"
-  cat "$INPUT"
-else
-  echo "IDEA: $INPUT"
-fi
-```
+2. **If it looks like a path** (starts with `/`, `./`, `~`, or contains `/`):
+   - Use Glob to check if it exists as file or folder
+   - If **folder**: Use Glob to find `*.md`, `*.txt`, `*.json` files, then Read relevant ones (README, spec, plan files)
+   - If **file**: Use Read to get contents as starting point
 
-**Based on input type:**
-- **NO_INPUT**: Use AskUserQuestion: "What feature or project would you like to spec out?"
-- **FOLDER**: Read relevant files to understand existing context, then interview to fill gaps
-- **FILE**: Read the file as starting point, then interview to expand
-- **IDEA**: Use the text as the seed for interviewing
+3. **Otherwise**: Treat as an idea/description to seed the interview
 
 ### Phase 2: Deep Interview
 
