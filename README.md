@@ -19,13 +19,19 @@ Personal collection of Claude Code tools and skills.
 
 ### Commands
 
-**interview** - Deep interview process to build comprehensive specs before coding. Accepts files, folders, or text descriptions as input.
+**prd** - Deep interview to build comprehensive specs + PRD JSON for Ralph Wiggum-style iteration. Generates spec, PRD, and progress files, then copies ralph-loop command to clipboard.
 
 ```
-/somto-dev-toolkit:interview "add user authentication"
-/somto-dev-toolkit:interview ./plans/feature.md
-/somto-dev-toolkit:interview ./specs/
+/somto-dev-toolkit:prd "add user authentication"
+/somto-dev-toolkit:prd ./plans/feature.md
+/somto-dev-toolkit:prd ./specs/
 ```
+
+Outputs:
+- `plans/<feature>-spec.md` - comprehensive spec
+- `plans/<feature>.prd.json` - user stories with pass/fail status
+- `plans/<feature>.progress.txt` - iteration log (JSON lines)
+- ralph-loop command copied to clipboard
 
 ## Updating
 
