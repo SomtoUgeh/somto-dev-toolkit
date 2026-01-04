@@ -90,69 +90,205 @@ Ask: "If a user pastes formatted text from Word into this field, should we strip
 Instead of: "Should it be fast?"
 Ask: "If this query takes >500ms, should we show a loading state, optimistically update, or block the UI?"
 
+### Phase 2.5: Research (after Wave 1, before Wave 2)
+
+After Wave 1 answers establish core problem/user context, **PAUSE interviewing** and run research. Store findings in `<research_findings>` for Phase 3.
+
+**Step 1: Codebase Research**
+
+Use Task tool with subagent_type="Explore":
+```
+<task_prompt>
+Search codebase for existing implementations related to <feature_topic>.
+Find: existing patterns, similar features, models touched, services involved.
+Return: file paths, code snippets, patterns to follow.
+</task_prompt>
+```
+
+Also check `plans/` folder for existing specs:
+```bash
+ls plans/
+```
+
+**Step 2: External Research (Exa)**
+
+Use Task tool with subagent_type="general-purpose":
+```
+<task_prompt>
+Use Exa MCP tools to research <feature_topic>:
+1. mcp__exa__get_code_context_exa - find code examples for <technology> <feature_type>
+2. mcp__exa__web_search_exa - find best practices 2025
+Return: code snippets, key recommendations, links.
+</task_prompt>
+```
+
+**Step 3: Skill Application (conditional)**
+
+- If UI/frontend mentioned → use Task with subagent_type="general-purpose" to apply frontend-design skill
+- If API/data models mentioned → note architecture patterns for spec
+- If auth/sensitive data mentioned → flag for Phase 3.5 security review
+
+**Step 4: Store findings**
+
+Collect all research outputs into:
+```
+<research_findings>
+  <codebase_patterns>...</codebase_patterns>
+  <existing_specs>...</existing_specs>
+  <exa_recommendations>...</exa_recommendations>
+  <skill_insights>...</skill_insights>
+</research_findings>
+```
+
+**Then continue to Wave 2** with research context. Use findings to ask informed questions (e.g., "I found a similar pattern in X, should we follow that?")
+
 ### Phase 3: Synthesize & Write Spec
 
-After thorough interviewing (minimum 10-15 questions answered), write the spec:
+After thorough interviewing (minimum 10-15 questions answered), write the spec.
+
+**Incorporate `<research_findings>` from Phase 2.5:**
+- `<codebase_patterns>` → add to "Implementation Notes"
+- `<exa_recommendations>` → add to "Technical Design" and "Non-Functional Requirements"
+- `<existing_specs>` → reference in "References"
+- `<skill_insights>` → apply to relevant sections
 
 **Spec Structure:**
 
 ```markdown
-# [Feature Name] Specification
+# <feature_name> Specification
 
 ## Overview
-[One paragraph summary]
+<one_paragraph_summary>
 
 ## Problem Statement
-[What problem this solves and for whom]
+<problem_and_audience>
 
 ## Success Criteria
-[Measurable outcomes]
+<measurable_outcomes>
 
 ## User Stories
-[As a X, I want Y, so that Z - one per line, these become PRD items]
+<user_stories_list>
+As a X, I want Y, so that Z - one per line, these become PRD items
 
 ## Detailed Requirements
 
 ### Functional Requirements
-[Specific behaviors with edge cases]
+<specific_behaviors_with_edge_cases>
 
 ### Non-Functional Requirements
-[Performance, security, accessibility]
+<performance_security_accessibility>
 
 ### UI/UX Specifications
-[Flows, states, error handling]
+<flows_states_error_handling>
 
 ## Technical Design
 
 ### Data Models
-[Schema changes, relationships]
+<schema_changes_relationships>
 
 ### API Contracts
-[Endpoints, request/response shapes]
+<endpoints_request_response_shapes>
 
 ### System Interactions
-[What services/systems are touched]
+<services_systems_touched>
 
 ### Implementation Notes
-[Patterns to follow, files to reference]
+<patterns_to_follow_files_to_reference>
+(incorporate <codebase_patterns> from research)
 
 ## Edge Cases & Error Handling
-[Comprehensive list from interview]
+<comprehensive_list_from_interview>
 
 ## Open Questions
-[Anything still unresolved]
+<unresolved_items>
 
 ## Out of Scope
-[Explicitly excluded items]
+<explicitly_excluded>
+
+## Review Findings
+<phase_3_5_reviewer_feedback>
+(populated from <review_feedback>)
 
 ## References
-[Related files, docs, prior art]
+<related_files_docs_prior_art>
+(incorporate <existing_specs> from research)
 ```
 
 Write spec to file:
 - If input was a file: overwrite it with complete spec
-- If input was a folder: write to `{folder}/spec.md`
-- If input was an idea: write to `plans/[feature-name]-spec.md`
+- If input was a folder: write to `<folder>/spec.md`
+- If input was an idea: write to `plans/<feature_name>-spec.md`
+
+### Phase 3.5: Spec Review (before PRD generation)
+
+After writing spec, spawn review agents to catch issues before generating PRD.
+
+**Required Reviewers (spawn all 3 using Task tool in single message):**
+
+Use Task tool with subagent_type for each:
+
+Use the spec content written in Phase 3 (store as `<spec_content>` variable).
+
+```
+<reviewer_1>
+subagent_type: "compound-engineering:workflow:spec-flow-analyzer"
+<task_prompt>
+<spec_content>{spec written in Phase 3}</spec_content>
+Analyze for user flows, edge cases, missing scenarios.
+Return: missing flows, edge cases not covered, flow gaps.
+</task_prompt>
+</reviewer_1>
+
+<reviewer_2>
+subagent_type: "compound-engineering:review:architecture-strategist"
+<task_prompt>
+<spec_content>{spec written in Phase 3}</spec_content>
+Review for architectural soundness.
+Return: component boundary issues, dependency concerns, design principle violations.
+</task_prompt>
+</reviewer_2>
+
+<reviewer_3>
+subagent_type: "compound-engineering:review:security-sentinel"
+<task_prompt>
+<spec_content>{spec written in Phase 3}</spec_content>
+Scan for security gaps.
+Return: auth issues, data exposure risks, input validation gaps, OWASP concerns.
+</task_prompt>
+</reviewer_3>
+```
+
+**Conditional Reviewers:**
+- If UI work detected → also spawn with subagent_type="compound-engineering:design:design-implementation-reviewer"
+- If touching existing code → also spawn with subagent_type="compound-engineering:review:pattern-recognition-specialist"
+
+**Synthesis:**
+
+Store all review outputs in `<review_feedback>`:
+```
+<review_feedback>
+  <flow_issues>...</flow_issues>
+  <architecture_issues>...</architecture_issues>
+  <security_issues>...</security_issues>
+</review_feedback>
+```
+
+1. Add critical items to spec's "Review Findings" section
+2. Update User Stories if reviewers found missing flows
+3. Flag unresolved concerns in "Open Questions"
+
+**Gate:**
+
+If critical security/architecture issues found, use AskUserQuestion:
+"Reviewers found <issues_summary>. Address now or proceed to PRD generation?"
+
+Options:
+- **Address issues** - Update spec with fixes
+- **Proceed anyway** - Generate PRD with noted concerns
+
+**Re-review clause (max 1 re-review):**
+
+If addressing issues results in major spec changes (new user stories, architectural pivots, or scope changes), re-run the 3 required reviewers **once**. After 1 re-review, proceed to Phase 4 regardless. Minor fixes don't require re-review.
 
 ### Phase 4: Generate PRD JSON
 
@@ -163,17 +299,17 @@ Parse the User Stories section from the spec and create a PRD JSON file.
 - Checkbox items like `- [ ] User can...`
 - Numbered items in User Stories section
 
-**Write to `plans/[feature-name].prd.json`:**
+**Write to `plans/<feature_name>.prd.json`:**
 
 ```json
 {
-  "title": "[Feature Name]",
+  "title": "<feature_name>",
   "stories": [
     {"id": 1, "title": "User can create account", "passes": false, "priority": 1},
     {"id": 2, "title": "User can login", "passes": false, "priority": 2}
   ],
-  "created_at": "[ISO8601 timestamp]",
-  "source_spec": "plans/[feature-name]-spec.md"
+  "created_at": "<iso8601_timestamp>",
+  "source_spec": "plans/<feature_name>-spec.md"
 }
 ```
 
@@ -181,10 +317,10 @@ All stories start with `passes: false`. Priority is order of appearance (1 = fir
 
 ### Phase 5: Create Progress File
 
-Write to `plans/[feature-name].progress.txt`:
+Write to `plans/<feature_name>.progress.txt`:
 
 ```
-# Progress Log: [feature-name]
+# Progress Log: <feature_name>
 # Each line: JSON object with ts, story_id, status, notes
 # Status values: STARTED, PASSED, FAILED, BLOCKED
 ```
@@ -194,15 +330,49 @@ This file starts empty (just the header). Ralph iterations will append JSON line
 {"ts":"2026-01-04T12:30:00Z","story_id":1,"status":"PASSED","notes":"implemented auth flow"}
 ```
 
+### Phase 5.5: Complexity Estimation
+
+Before generating Ralph command, spawn a sub-agent to estimate implementation complexity.
+
+Use Task tool with subagent_type="general-purpose":
+
+Use the PRD JSON from Phase 4 and spec from Phase 3.
+
+```
+<task_prompt>
+Analyze this PRD for implementation complexity.
+
+<prd_json>{PRD JSON written in Phase 4}</prd_json>
+
+<spec_content>{spec written in Phase 3}</spec_content>
+
+For each story, estimate:
+1. Files likely touched (count)
+2. New vs modify existing code
+3. External dependencies/integrations
+4. Test complexity
+
+Return in this format:
+<complexity_estimate>
+  <per_story_scores>story_id: score (1-5)</per_story_scores>
+  <total_iterations>sum of scores × 2</total_iterations>
+  <risk_factors>stories that block others, unknowns</risk_factors>
+  <recommended_max_iterations>total + 20% buffer, minimum 20</recommended_max_iterations>
+</complexity_estimate>
+</task_prompt>
+```
+
+Store `<recommended_max_iterations>` value for Phase 6.
+
 ### Phase 6: Generate Ralph Command
 
 Build the ralph-loop command with correct file paths:
 
 ```
-/ralph-loop "Execute PRD at plans/[feature-name].prd.json
+/ralph-loop "Execute PRD at plans/<feature_name>.prd.json
 
-1. Read plans/[feature-name].prd.json
-2. Read plans/[feature-name].progress.txt for context
+1. Read plans/<feature_name>.prd.json
+2. Read plans/<feature_name>.progress.txt for context
 
 For each story where passes=false (in priority order):
   a. Implement the story
@@ -210,14 +380,14 @@ For each story where passes=false (in priority order):
   c. Run tests + types
   d. If tests pass:
      - Update PRD: set story.passes = true
-     - Append to progress.txt: {\"ts\":\"[now]\",\"story_id\":[id],\"status\":\"PASSED\",\"notes\":\"[summary]\"}
+     - Append to progress.txt: {\"ts\":\"<now>\",\"story_id\":<id>,\"status\":\"PASSED\",\"notes\":\"<summary>\"}
   e. If tests fail:
-     - Append to progress.txt: {\"ts\":\"[now]\",\"story_id\":[id],\"status\":\"FAILED\",\"notes\":\"[error]\"}
+     - Append to progress.txt: {\"ts\":\"<now>\",\"story_id\":<id>,\"status\":\"FAILED\",\"notes\":\"<error>\"}
      - Fix and retry
 
 Commit after each story. Keep CI green (format, lint, tests + types must pass).
 
-Output <promise>All stories pass</promise> when ALL stories have passes=true" --completion-promise "All stories pass" --max-iterations 50
+Output <promise>All stories pass</promise> when ALL stories have passes=true" --completion-promise "All stories pass" --max-iterations <recommended_max_iterations>
 ```
 
 **Copy command to clipboard using Bash:**
@@ -227,9 +397,9 @@ echo '<command>' | pbcopy
 
 **Then use AskUserQuestion:**
 "PRD ready! Files created:
-- `plans/[feature-name]-spec.md`
-- `plans/[feature-name].prd.json`
-- `plans/[feature-name].progress.txt`
+- `plans/<feature_name>-spec.md`
+- `plans/<feature_name>.prd.json`
+- `plans/<feature_name>.progress.txt`
 
 Ralph command copied to clipboard. What next?"
 
