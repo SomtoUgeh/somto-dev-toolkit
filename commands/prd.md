@@ -217,7 +217,7 @@ As a X, I want Y, so that Z - one per line, these become PRD items
 Write spec to file:
 - If input was a file: overwrite it with complete spec
 - If input was a folder: write to `<folder>/spec.md`
-- If input was an idea: write to `plans/<feature_name>-spec.md`
+- If input was an idea: create `plans/<feature_name>/` folder, write to `plans/<feature_name>/spec.md`
 
 ### Phase 3.5: Spec Review (before PRD generation)
 
@@ -299,7 +299,7 @@ Parse the User Stories section from the spec and create a PRD JSON file.
 - Checkbox items like `- [ ] User can...`
 - Numbered items in User Stories section
 
-**Write to `plans/<feature_name>.prd.json`:**
+**Write to `plans/<feature_name>/prd.json`:**
 
 ```json
 {
@@ -309,7 +309,7 @@ Parse the User Stories section from the spec and create a PRD JSON file.
     {"id": 2, "title": "User can login", "passes": false, "priority": 2}
   ],
   "created_at": "<iso8601_timestamp>",
-  "source_spec": "plans/<feature_name>-spec.md"
+  "source_spec": "plans/<feature_name>/spec.md"
 }
 ```
 
@@ -317,7 +317,7 @@ All stories start with `passes: false`. Priority is order of appearance (1 = fir
 
 ### Phase 5: Create Progress File
 
-Write to `plans/<feature_name>.progress.txt`:
+Write to `plans/<feature_name>/progress.txt`:
 
 ```
 # Progress Log: <feature_name>
@@ -382,15 +382,18 @@ Store `<recommended_max_iterations>` value for Phase 6.
 Build the ralph-loop command with correct file paths:
 
 ```
-/ralph-loop "Execute PRD at plans/<feature_name>.prd.json
+/ralph-wiggum:ralph-loop "Execute PRD at plans/<feature_name>/prd.json
 
-1. Read plans/<feature_name>.prd.json
-2. Read plans/<feature_name>.progress.txt for context
+1. Read plans/<feature_name>/spec.md
+2. Read plans/<feature_name>/prd.json
+3. Read plans/<feature_name>/progress.txt for context
+
+Read all files in their entirety.
 
 For each story where passes=false (in priority order):
   a. Implement the story
   b. Write/update tests
-  c. Run tests + types
+  c. Run format, lint, tests, and types
   d. If tests pass:
      - Update PRD: set story.passes = true
      - Append to progress.txt: {\"ts\":\"<now>\",\"story_id\":<id>,\"status\":\"PASSED\",\"notes\":\"<summary>\"}
@@ -410,9 +413,9 @@ echo '<command>' | pbcopy
 
 **Then use AskUserQuestion:**
 "PRD ready! Files created:
-- `plans/<feature_name>-spec.md`
-- `plans/<feature_name>.prd.json`
-- `plans/<feature_name>.progress.txt`
+- `plans/<feature_name>/spec.md`
+- `plans/<feature_name>/prd.json`
+- `plans/<feature_name>/progress.txt`
 
 Ralph command copied to clipboard. What next?"
 
