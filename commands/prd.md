@@ -1,6 +1,6 @@
 ---
 name: prd
-description: Deep interview to build PRD and prepare ralph-loop command
+description: Deep interview to build PRD for new features or enhancements
 argument-hint: "<file|folder|idea description>"
 ---
 
@@ -110,7 +110,18 @@ Also check `plans/` folder for existing specs:
 ls plans/
 ```
 
-**Step 2: External Research (Exa)**
+**Step 2: Git History Analysis**
+
+Use Task tool with subagent_type="compound-engineering:research:git-history-analyzer":
+```
+<task_prompt>
+Analyze git history for code related to <feature_topic>.
+Find: prior attempts at similar features, key contributors, why existing patterns evolved, decisions/constraints from past changes.
+Return: historical context, contributors to consult, lessons learned, patterns to respect.
+</task_prompt>
+```
+
+**Step 3: External Research (Exa)**
 
 Use Task tool with subagent_type="general-purpose":
 ```
@@ -122,18 +133,19 @@ Return: code snippets, key recommendations, links.
 </task_prompt>
 ```
 
-**Step 3: Skill Application (conditional)**
+**Step 4: Skill Application (conditional)**
 
 - If UI/frontend mentioned → use Task with subagent_type="general-purpose" to apply frontend-design skill
 - If API/data models mentioned → note architecture patterns for spec
 - If auth/sensitive data mentioned → flag for Phase 3.5 security review
 
-**Step 4: Store findings**
+**Step 5: Store findings**
 
 Collect all research outputs into:
 ```
 <research_findings>
   <codebase_patterns>...</codebase_patterns>
+  <git_history>...</git_history>
   <existing_specs>...</existing_specs>
   <exa_recommendations>...</exa_recommendations>
   <skill_insights>...</skill_insights>
@@ -148,6 +160,7 @@ After thorough interviewing (minimum 10-15 questions answered), write the spec.
 
 **Incorporate `<research_findings>` from Phase 2.5:**
 - `<codebase_patterns>` → add to "Implementation Notes"
+- `<git_history>` → add to "Implementation Notes" (prior attempts, constraints, contributors to consult)
 - `<exa_recommendations>` → add to "Technical Design" and "Non-Functional Requirements"
 - `<existing_specs>` → reference in "References"
 - `<skill_insights>` → apply to relevant sections
