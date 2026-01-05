@@ -332,31 +332,44 @@ This file starts empty (just the header). Ralph iterations will append JSON line
 
 ### Phase 5.5: Complexity Estimation
 
-Before generating Ralph command, spawn a sub-agent to estimate implementation complexity.
+Before generating Ralph command, estimate implementation complexity using **actual research, not just reasoning**.
 
 Use Task tool with subagent_type="general-purpose":
 
-Use the PRD JSON from Phase 4 and spec from Phase 3.
-
 ```
 <task_prompt>
-Analyze this PRD for implementation complexity.
+Estimate implementation complexity for this PRD. You MUST use tools to research, not just reason.
 
 <prd_json>{PRD JSON written in Phase 4}</prd_json>
-
 <spec_content>{spec written in Phase 3}</spec_content>
 
-For each story, estimate:
-1. Files likely touched (count)
-2. New vs modify existing code
-3. External dependencies/integrations
-4. Test complexity
+**Required research steps:**
 
-Return in this format:
+1. **Codebase analysis** - Use Glob/Grep to find:
+   - Similar existing implementations
+   - Files that will likely need modification
+   - Existing patterns to follow
+
+2. **Dependency check** - For each external dep:
+   - Check if already in package.json
+   - Verify compatibility with project
+
+3. **Test coverage scan** - Use Glob to find:
+   - Existing test patterns
+   - Test file locations
+
+**Then estimate for each story:**
+- Files touched (actual count from research)
+- New vs modify (based on what exists)
+- Integration complexity (based on deps found)
+- Test complexity (based on existing test patterns)
+
+Return:
 <complexity_estimate>
-  <per_story_scores>story_id: score (1-5)</per_story_scores>
+  <research_summary>What you found in codebase</research_summary>
+  <per_story_scores>story_id: score (1-5) with justification</per_story_scores>
   <total_iterations>sum of scores × 2</total_iterations>
-  <risk_factors>stories that block others, unknowns</risk_factors>
+  <risk_factors>blocking dependencies, unknowns found</risk_factors>
   <recommended_max_iterations>total + 20% buffer, minimum 20</recommended_max_iterations>
 </complexity_estimate>
 </task_prompt>
