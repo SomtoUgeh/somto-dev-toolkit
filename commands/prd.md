@@ -403,6 +403,8 @@ Build the ralph-loop command with correct file paths:
 
 Read all files in their entirety.
 
+Create a new branch for this feature (use branch naming convention from CLAUDE.md/project description, or default to `feat/<feature_name>`).
+
 For each story where passes=false (in priority order):
   a. Implement the story
   b. Write/update tests
@@ -414,7 +416,7 @@ For each story where passes=false (in priority order):
      - Append to progress.txt: {\"ts\":\"<now>\",\"story_id\":<id>,\"status\":\"FAILED\",\"notes\":\"<error>\"}
      - Fix and retry
 
-Commit after each story. Keep CI green (format, lint, tests + types must pass).
+Commit changes in logical chunks. Keep CI green (format, lint, tests + types must pass).
 
 Output <promise>All stories pass</promise> when ALL stories have passes=true" --completion-promise "All stories pass" --max-iterations <recommended_max_iterations>
 ```
