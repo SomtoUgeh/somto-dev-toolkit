@@ -2,7 +2,7 @@
 
 # Work Loop Stop Hook
 # Unified hook for both generic and PRD modes
-# Prevents session exit when a work loop is active
+# Prevents session exit when a go loop is active
 # Feeds the same prompt back (generic) or advances to next story (PRD)
 
 set -euo pipefail
@@ -10,8 +10,8 @@ set -euo pipefail
 # Read hook input from stdin
 HOOK_INPUT=$(cat)
 
-# Check if work loop is active
-STATE_FILE=".claude/work-loop.local.md"
+# Check if go loop is active
+STATE_FILE=".claude/go-loop.local.md"
 
 if [[ ! -f "$STATE_FILE" ]]; then
   # No active loop - allow exit
@@ -26,7 +26,7 @@ MAX_ITERATIONS=$(echo "$FRONTMATTER" | grep '^max_iterations:' | sed 's/max_iter
 
 # Validate mode
 if [[ -z "$MODE" ]]; then
-  echo "Work loop: State file corrupted (no mode)" >&2
+  echo "Go loop: State file corrupted (no mode)" >&2
   echo "Stopping loop. Run /work again to start fresh." >&2
   rm "$STATE_FILE"
   exit 0
@@ -34,20 +34,20 @@ fi
 
 # Validate numeric fields
 if [[ ! "$ITERATION" =~ ^[0-9]+$ ]]; then
-  echo "Work loop: State file corrupted (invalid iteration: '$ITERATION')" >&2
+  echo "Go loop: State file corrupted (invalid iteration: '$ITERATION')" >&2
   rm "$STATE_FILE"
   exit 0
 fi
 
 if [[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]]; then
-  echo "Work loop: State file corrupted (invalid max_iterations: '$MAX_ITERATIONS')" >&2
+  echo "Go loop: State file corrupted (invalid max_iterations: '$MAX_ITERATIONS')" >&2
   rm "$STATE_FILE"
   exit 0
 fi
 
 # Check if max iterations reached
 if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $ITERATION -ge $MAX_ITERATIONS ]]; then
-  echo "Work loop: Max iterations ($MAX_ITERATIONS) reached."
+  echo "Go loop: Max iterations ($MAX_ITERATIONS) reached."
   echo "State preserved at $STATE_FILE for manual review."
   # Don't delete state file - preserve for debugging
   exit 0
@@ -57,14 +57,14 @@ fi
 TRANSCRIPT_PATH=$(echo "$HOOK_INPUT" | jq -r '.transcript_path')
 
 if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
-  echo "Work loop: Transcript file not found" >&2
+  echo "Go loop: Transcript file not found" >&2
   rm "$STATE_FILE"
   exit 0
 fi
 
 # Check if there are any assistant messages
 if ! grep -q '"role":"assistant"' "$TRANSCRIPT_PATH"; then
-  echo "Work loop: No assistant messages found" >&2
+  echo "Go loop: No assistant messages found" >&2
   rm "$STATE_FILE"
   exit 0
 fi
@@ -78,7 +78,7 @@ if [[ "$MODE" == "generic" ]]; then
   # Extract last assistant message
   LAST_LINE=$(grep '"role":"assistant"' "$TRANSCRIPT_PATH" | tail -1)
   if [[ -z "$LAST_LINE" ]]; then
-    echo "Work loop: Failed to extract last assistant message" >&2
+    echo "Go loop: Failed to extract last assistant message" >&2
     rm "$STATE_FILE"
     exit 0
   fi
@@ -92,7 +92,7 @@ if [[ "$MODE" == "generic" ]]; then
   ' 2>/dev/null || echo "")
 
   if [[ -z "$LAST_OUTPUT" ]]; then
-    echo "Work loop: Assistant message contained no text" >&2
+    echo "Go loop: Assistant message contained no text" >&2
     rm "$STATE_FILE"
     exit 0
   fi
@@ -101,7 +101,7 @@ if [[ "$MODE" == "generic" ]]; then
   PROMISE_TEXT=$(echo "$LAST_OUTPUT" | perl -0777 -pe 's/.*?<promise>(.*?)<\/promise>.*/$1/s; s/^\s+|\s+$//g; s/\s+/ /g' 2>/dev/null || echo "")
 
   if [[ -n "$PROMISE_TEXT" ]] && [[ -n "$COMPLETION_PROMISE" ]] && [[ "$PROMISE_TEXT" == "$COMPLETION_PROMISE" ]]; then
-    echo "Work loop: Detected <promise>$COMPLETION_PROMISE</promise>"
+    echo "Go loop: Detected <promise>$COMPLETION_PROMISE</promise>"
     echo "Task complete!"
     rm "$STATE_FILE"
     exit 0
@@ -114,7 +114,7 @@ if [[ "$MODE" == "generic" ]]; then
   PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
 
   if [[ -z "$PROMPT_TEXT" ]]; then
-    echo "Work loop: State file corrupted (no prompt found)" >&2
+    echo "Go loop: State file corrupted (no prompt found)" >&2
     rm "$STATE_FILE"
     exit 0
   fi
@@ -125,7 +125,7 @@ if [[ "$MODE" == "generic" ]]; then
   mv "$TEMP_FILE" "$STATE_FILE"
 
   # Build system message
-  SYSTEM_MSG="Work loop iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
+  SYSTEM_MSG="Go loop iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
 
   # Output JSON to block the stop and feed prompt back
   jq -n \
@@ -153,14 +153,14 @@ if [[ "$MODE" == "prd" ]]; then
 
   # Validate PRD file exists
   if [[ ! -f "$PRD_PATH" ]]; then
-    echo "Work loop: PRD file not found: $PRD_PATH" >&2
+    echo "Go loop: PRD file not found: $PRD_PATH" >&2
     rm "$STATE_FILE"
     exit 0
   fi
 
   # Validate PRD JSON
   if ! jq empty "$PRD_PATH" 2>/dev/null; then
-    echo "Work loop: Invalid JSON in PRD file" >&2
+    echo "Go loop: Invalid JSON in PRD file" >&2
     rm "$STATE_FILE"
     exit 0
   fi
@@ -180,7 +180,7 @@ if [[ "$MODE" == "prd" ]]; then
     # Extract prompt
     PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
 
-    SYSTEM_MSG="Work loop iteration $NEXT_ITERATION | Story #$CURRENT_STORY_ID not yet passing"
+    SYSTEM_MSG="Go loop iteration $NEXT_ITERATION | Story #$CURRENT_STORY_ID not yet passing"
 
     jq -n \
       --arg prompt "$PROMPT_TEXT" \
@@ -208,7 +208,7 @@ if [[ "$MODE" == "prd" ]]; then
 
     PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
 
-    SYSTEM_MSG="Work loop: Story #$CURRENT_STORY_ID passes but NO COMMIT FOUND. Commit your changes: feat($FEATURE_NAME): story #$CURRENT_STORY_ID - $STORY_TITLE"
+    SYSTEM_MSG="Go loop: Story #$CURRENT_STORY_ID passes but NO COMMIT FOUND. Commit your changes: feat($FEATURE_NAME): story #$CURRENT_STORY_ID - $STORY_TITLE"
 
     jq -n \
       --arg prompt "$PROMPT_TEXT" \
@@ -232,7 +232,7 @@ if [[ "$MODE" == "prd" ]]; then
 
   if [[ -z "$NEXT_STORY_ID" ]]; then
     # All stories complete!
-    echo "Work loop: All stories complete! Feature '$FEATURE_NAME' is done."
+    echo "Go loop: All stories complete! Feature '$FEATURE_NAME' is done."
     rm "$STATE_FILE"
     exit 0
   fi
@@ -299,7 +299,7 @@ EOF
   # Extract new prompt
   PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
 
-  SYSTEM_MSG="Work loop: Story #$CURRENT_STORY_ID complete! Now working on story #$NEXT_STORY_ID of $TOTAL_STORIES"
+  SYSTEM_MSG="Go loop: Story #$CURRENT_STORY_ID complete! Now working on story #$NEXT_STORY_ID of $TOTAL_STORIES"
 
   jq -n \
     --arg prompt "$PROMPT_TEXT" \
@@ -314,6 +314,6 @@ EOF
 fi
 
 # Unknown mode
-echo "Work loop: Unknown mode '$MODE'" >&2
+echo "Go loop: Unknown mode '$MODE'" >&2
 rm "$STATE_FILE"
 exit 0

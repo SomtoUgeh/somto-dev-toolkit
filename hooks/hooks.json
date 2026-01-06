@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/work_stop_hook.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/go_stop_hook.sh"
           }
         ]
       }

@@ -1,18 +1,18 @@
 ---
-name: work-help
-description: Help for the work loop command
+name: go-help
+description: Help for the go loop command
 ---
 
-# Work Loop Help
+# Go Loop Help
 
-The `/work` command provides iterative task execution in two modes.
+The `/go` command provides iterative task execution in two modes.
 
 ## Generic Mode
 
 Like ralph-wiggum - loop on any task until completion.
 
 ```bash
-/work "Your task description" --completion-promise "DONE" --max-iterations 30
+/go "Your task description" --completion-promise "DONE" --max-iterations 30
 ```
 
 **How it works:**
@@ -31,8 +31,8 @@ Like ralph-wiggum - loop on any task until completion.
 For structured development with PRD files from `/prd`.
 
 ```bash
-/work plans/feature/prd.json
-/work --prd plans/feature/prd.json
+/go plans/feature/prd.json
+/go --prd plans/feature/prd.json
 ```
 
 **How it works:**
@@ -50,13 +50,13 @@ For structured development with PRD files from `/prd`.
 
 ## Commands
 
-- `/work` - Start a work loop
-- `/cancel-work` - Stop active loop
-- `/work-help` - This help
+- `/go` - Start a go loop
+- `/cancel-go` - Stop active loop
+- `/go-help` - This help
 
 ## State File
 
-Both modes use `.claude/work-loop.local.md` which contains:
+Both modes use `.claude/go-loop.local.md` which contains:
 - YAML frontmatter with mode, iteration, settings
 - Current prompt/task below the frontmatter
 
@@ -64,15 +64,15 @@ Both modes use `.claude/work-loop.local.md` which contains:
 
 **Generic - Build a feature:**
 ```
-/work "Implement user authentication with JWT tokens" --completion-promise "AUTH COMPLETE"
+/go "Implement user authentication with JWT tokens" --completion-promise "AUTH COMPLETE"
 ```
 
 **PRD - Execute a spec:**
 ```
-/work plans/auth/prd.json
+/go plans/auth/prd.json
 ```
 
 **With custom iteration limit:**
 ```
-/work "Refactor the database layer" --completion-promise "REFACTOR DONE" --max-iterations 100
+/go "Refactor the database layer" --completion-promise "REFACTOR DONE" --max-iterations 100
 ```

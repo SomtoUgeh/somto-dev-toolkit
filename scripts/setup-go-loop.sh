@@ -4,11 +4,11 @@
 # Dual-mode: Generic (ralph-wiggum style) or PRD-aware
 #
 # Generic mode:
-#   setup-work-loop.sh "Your prompt" --completion-promise "DONE" [--max-iterations N]
+#   setup-go-loop.sh "Your prompt" --completion-promise "DONE" [--max-iterations N]
 #
 # PRD mode:
-#   setup-work-loop.sh --prd plans/feature/prd.json [--max-iterations N]
-#   setup-work-loop.sh plans/feature/prd.json  # auto-detect .json
+#   setup-go-loop.sh --prd plans/feature/prd.json [--max-iterations N]
+#   setup-go-loop.sh plans/feature/prd.json  # auto-detect .json
 
 set -euo pipefail
 
@@ -50,7 +50,7 @@ PRD MODE:
 STOPPING:
   Generic: output <promise>TEXT</promise>
   PRD: all stories pass (automatic)
-  Both: /cancel-work
+  Both: /cancel-go
 HELP_EOF
 }
 
@@ -127,7 +127,7 @@ fi
 # Create .claude directory if needed
 mkdir -p .claude
 
-STATE_FILE=".claude/work-loop.local.md"
+STATE_FILE=".claude/go-loop.local.md"
 
 if [[ "$MODE" == "generic" ]]; then
   # Generic mode validation
@@ -169,7 +169,7 @@ EOF
 
   # Output setup message
   cat <<EOF
-Work loop activated (generic mode)!
+Go loop activated (generic mode)!
 
 Iteration: 1
 Max iterations: $MAX_ITERATIONS
@@ -179,7 +179,7 @@ The stop hook is now active. When you try to exit, the same prompt will be
 fed back for the next iteration until you output the completion promise.
 
 To complete: output <promise>$COMPLETION_PROMISE</promise>
-To cancel: /cancel-work
+To cancel: /cancel-go
 EOF
 
 else
@@ -288,7 +288,7 @@ EOF
 
   # Output setup message
   cat <<EOF
-Work loop activated (PRD mode)!
+Go loop activated (PRD mode)!
 
 Feature: $FEATURE_NAME
 PRD: $PRD_PATH
@@ -301,6 +301,6 @@ The stop hook is now active. When you complete a story, it will:
 - Verify you committed
 - Advance to the next story automatically
 
-To cancel: /cancel-work
+To cancel: /cancel-go
 EOF
 fi

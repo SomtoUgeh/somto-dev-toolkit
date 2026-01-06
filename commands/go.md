@@ -1,10 +1,10 @@
 ---
-name: work
-description: Iterative work loop (generic or PRD-aware)
+name: go
+description: Iterative task loop (generic or PRD-aware)
 argument-hint: "<prompt|prd.json> [--completion-promise TEXT] [--max-iterations N]"
 ---
 
-# Work Loop
+# Go Loop
 
 Execute tasks iteratively with automatic progression.
 
@@ -20,15 +20,15 @@ This command supports two modes:
 For any iterative task. Loops until you output the completion promise.
 
 ```
-/work "Build a CSV parser with validation" --completion-promise "PARSER COMPLETE"
+/go "Build a CSV parser with validation" --completion-promise "PARSER COMPLETE"
 ```
 
 ### PRD Mode
 For PRD-based development. Auto-detects `.json` files or `--prd` flag.
 
 ```
-/work plans/auth/prd.json
-/work --prd plans/feature/prd.json
+/go plans/auth/prd.json
+/go --prd plans/feature/prd.json
 ```
 
 ---
@@ -44,7 +44,7 @@ For PRD-based development. Auto-detects `.json` files or `--prd` flag.
 ${CLAUDE_PLUGIN_ROOT}/scripts/setup-work-loop.sh <args>
 ```
 
-**Then read the generated state file at `.claude/work-loop.local.md` and begin work.**
+**Then read the generated state file at `.claude/go-loop.local.md` and begin work.**
 
 For generic mode: Work on the task and output `<promise>TEXT</promise>` when complete.
 

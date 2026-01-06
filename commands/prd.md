@@ -426,17 +426,17 @@ Return:
 
 Store `<recommended_max_iterations>` value for Phase 6.
 
-### Phase 6: Generate Work Command
+### Phase 6: Generate Go Command
 
-Build the work command with the PRD path:
+Build the go command with the PRD path:
 
 ```
-/work plans/<feature_name>/prd.json --max-iterations <recommended_max_iterations>
+/go plans/<feature_name>/prd.json --max-iterations <recommended_max_iterations>
 ```
 
 **Copy command to clipboard using Bash:**
 ```bash
-echo '/work plans/<feature_name>/prd.json --max-iterations <recommended_max_iterations>' | pbcopy
+echo '/go plans/<feature_name>/prd.json --max-iterations <recommended_max_iterations>' | pbcopy
 ```
 
 **Then use AskUserQuestion:**
@@ -445,10 +445,10 @@ echo '/work plans/<feature_name>/prd.json --max-iterations <recommended_max_iter
 - `plans/<feature_name>/prd.json`
 - `plans/<feature_name>/progress.txt`
 
-Work command copied to clipboard. What next?"
+Go command copied to clipboard. What next?"
 
 Options:
-- **Run /work now** - Paste and execute immediately
+- **Run /go now** - Paste and execute immediately
 - **Done** - Files ready for later
 
 ---
