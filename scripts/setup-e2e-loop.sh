@@ -183,6 +183,27 @@ started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 **E2E folder:** \`$E2E_FOLDER/\`
 **Max iterations:** $(if [[ $MAX_ITERATIONS -gt 0 ]]; then echo "$MAX_ITERATIONS"; else echo "unlimited"; fi)
 
+## What Belongs in E2E Tests (vs Unit Tests)
+
+**E2E tests are for:**
+- Critical user journeys (signup, checkout, onboarding)
+- Multi-page flows that cross system boundaries
+- Authentication and authorization flows
+- Integration between frontend and backend
+- Visual/UI behavior users actually see
+- Happy paths that generate revenue or core value
+
+**Leave to unit tests:**
+- Individual function logic and edge cases
+- Data transformation and validation rules
+- Error message content and formatting
+- Business logic calculations
+- API response parsing
+- State management reducers
+
+**Rule of thumb:** If you can test it without a browser, it's probably a unit test.
+E2E tests are expensive (slow, flaky) - reserve them for flows where real browser interaction matters.
+
 ## File Naming Convention
 
 - \`*.e2e.page.ts\` - Page objects (locators, setup, actions)
