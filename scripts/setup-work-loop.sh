@@ -271,7 +271,8 @@ $CURRENT_STORY
 4. Write/update tests as needed
 5. Run: format, lint, tests, types (all must pass)
 6. Update \`$PRD_PATH\`: set \`passes = true\` for story $FIRST_INCOMPLETE
-7. Commit: \`feat($FEATURE_NAME): story #$FIRST_INCOMPLETE - $CURRENT_TITLE\`
+7. Commit with appropriate type: \`<type>($FEATURE_NAME): story #$FIRST_INCOMPLETE - $CURRENT_TITLE\`
+   Types: feat (new feature), fix (bug fix), refactor, test, chore, docs
 
 When you're done with this story, the hook will automatically:
 - Verify the story passes in prd.json
