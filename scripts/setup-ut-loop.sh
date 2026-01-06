@@ -274,8 +274,9 @@ If uncovered code is not worth testing (boilerplate, unreachable error branches,
 3. Write ONE meaningful test that validates the feature works correctly for users
    - Place the test file next to the source file (colocation)
 4. Run \`$TEST_COMMAND\` again - coverage should increase as a side effect of testing real behavior
-5. Commit with message: \`test(<file>): <describe the user behavior being tested>\`
-6. Append progress to \`.claude/ut-progress.txt\`:
+5. **Lint & format** - run project's lint/format commands, fix any errors
+6. Commit with message: \`test(<file>): <describe the user behavior being tested>\`
+7. Append progress to \`.claude/ut-progress.txt\`:
    \`\`\`json
    {"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","iteration":1,"file":"<file>","notes":"<what you tested>"}
    \`\`\`

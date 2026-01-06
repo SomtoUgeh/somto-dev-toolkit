@@ -332,8 +332,9 @@ projects: [
 2. Create or update the page object (\`*.e2e.page.ts\`) if needed
 3. Write ONE focused E2E test (\`*.e2e.ts\`)
 4. Run \`$TEST_COMMAND\` to verify the test passes
-5. Commit with message: \`test(e2e): <describe the user flow tested>\`
-6. Append progress to \`.claude/e2e-progress.txt\`:
+5. **Lint & format** - run project's lint/format commands, fix any errors
+6. Commit with message: \`test(e2e): <describe the user flow tested>\`
+7. Append progress to \`.claude/e2e-progress.txt\`:
    \`\`\`json
    {"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","iteration":1,"file":"<file>","flow":"<user flow>"}
    \`\`\`
