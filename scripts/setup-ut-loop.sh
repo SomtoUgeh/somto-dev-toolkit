@@ -239,9 +239,17 @@ A great test covers behavior users depend on. It should:
 
 Do NOT write tests just to increase coverage numbers. Use coverage as a guide to find UNTESTED USER-FACING BEHAVIOR.
 
-If uncovered code is not worth testing (boilerplate, unreachable error branches, internal plumbing), add \`/* v8 ignore next */\` or \`/* v8 ignore start */\` comments instead of writing low-value tests.
-
 ## FORBIDDEN
+
+**Do NOT abuse \`/* v8 ignore */\` comments.** These should be rare exceptions, not a way to skip writing tests. Valid uses:
+- Truly unreachable error branches (e.g., exhaustive switch default)
+- Framework boilerplate you don't control
+- Debug-only code paths
+
+Invalid uses (write a test instead):
+- "This is hard to test" - find a way
+- "This is internal code" - internal code breaks too
+- Anything user-facing or that could regress
 
 **NEVER modify coverage config to exclude files/folders.** This is cheating. The goal is to write tests, not to game metrics by hiding untested code. If you find yourself wanting to exclude something, either:
 1. Write a test for it
