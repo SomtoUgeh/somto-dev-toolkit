@@ -16,7 +16,7 @@
       "author": {
         "name": "Somto Odera"
       },
-      "keywords": ["blog", "writing", "svg", "diagrams", "interview", "spec", "git-guard", "safety", "test-coverage", "e2e", "playwright", "work", "prd"]
+      "keywords": ["blog", "writing", "svg", "diagrams", "interview", "spec", "git-guard", "safety", "ut", "unit-test", "e2e", "playwright", "go", "prd"]
     }
   ]
 }

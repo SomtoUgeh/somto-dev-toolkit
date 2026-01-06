@@ -1,12 +1,13 @@
 ---
-description: "Explain the test coverage loop technique"
+name: ut-help
+description: "Explain the unit test loop technique"
 ---
 
-# Test Coverage Loop Help
+# Unit Test Loop Help
 
 Explain the following to the user:
 
-## What is the Test Coverage Loop?
+## What is the Unit Test Loop?
 
 It creates an iterative loop where Claude:
 1. Runs coverage to find gaps
@@ -28,7 +29,7 @@ If uncovered code isn't worth testing (boilerplate, unreachable branches, intern
 
 ## Commands
 
-### `/test-coverage [OPTIONS]`
+### `/ut [OPTIONS]`
 
 Start a coverage improvement loop.
 
@@ -40,12 +41,12 @@ Start a coverage improvement loop.
 
 **Examples:**
 ```
-/test-coverage --target 80% --max-iterations 20
-/test-coverage --test-command "bun test:coverage"
-/test-coverage --completion-promise "ALL TESTS PASS" --max-iterations 10
+/ut --target 80% --max-iterations 20
+/ut --test-command "bun test:coverage"
+/ut --completion-promise "ALL TESTS PASS" --max-iterations 10
 ```
 
-### `/cancel-test-coverage`
+### `/cancel-ut`
 
 Stop an active loop and remove the state file.
 
@@ -76,16 +77,16 @@ The loop automatically detects:
 5. Write ONE test for that feature
 6. Run coverage again
 7. Commit: `test(<file>): <describe behavior>`
-8. Log to `.claude/test-coverage-progress.txt`
+8. Log to `.claude/ut-progress.txt`
 
 ## Stopping the Loop
 
 The loop stops when:
 - `<promise>YOUR_PROMISE</promise>` is output (default: COVERAGE COMPLETE)
 - `--max-iterations` is reached
-- `/cancel-test-coverage` is run
+- `/cancel-ut` is run
 
 ## Files Created
 
-- `.claude/test-coverage-loop.local.md` - State file (iteration, config, prompt)
-- `.claude/test-coverage-progress.txt` - Progress log (JSONL format)
+- `.claude/ut-loop.local.md` - State file (iteration, config, prompt)
+- `.claude/ut-progress.txt` - Progress log (JSONL format)

@@ -1,19 +1,20 @@
 ---
-description: "Start test coverage improvement loop"
+name: ut
+description: "Start unit test coverage improvement loop"
 argument-hint: "[--target N%] [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
-allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-test-coverage-loop.sh:*)"]
+allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-ut-loop.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
 
-# Test Coverage Loop
+# Unit Test Loop
 
-Execute the setup script to initialize the test coverage loop:
+Execute the setup script to initialize the unit test loop:
 
 ```!
-"${CLAUDE_PLUGIN_ROOT}/scripts/setup-test-coverage-loop.sh" $ARGUMENTS
+"${CLAUDE_PLUGIN_ROOT}/scripts/setup-ut-loop.sh" $ARGUMENTS
 ```
 
-You are now in a test coverage improvement loop based on Matt Pocock's pattern.
+You are now in a unit test coverage improvement loop based on Matt Pocock's pattern.
 
 ## Your Task
 
@@ -24,7 +25,7 @@ Each iteration, you must:
 3. **Write ONE meaningful test** that validates real user behavior
 4. **Run coverage again** to verify improvement
 5. **Commit** with message: `test(<file>): <describe behavior>`
-6. **Log progress** to `.claude/test-coverage-progress.txt`
+6. **Log progress** to `.claude/ut-progress.txt`
 
 ## Critical Rules
 

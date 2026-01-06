@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Test Coverage Loop Setup Script
-# Creates state file for in-session test coverage loop
+# Unit Test Loop Setup Script
+# Creates state file for in-session unit test loop
 
 set -euo pipefail
 
@@ -13,10 +13,10 @@ COMPLETION_PROMISE="COVERAGE COMPLETE"
 
 show_help() {
   cat << 'HELP_EOF'
-Test Coverage Loop - Iterative test coverage improvement (Matt Pocock pattern)
+Unit Test Loop - Iterative unit test coverage improvement (Matt Pocock pattern)
 
 USAGE:
-  /test-coverage [OPTIONS]
+  /ut [OPTIONS]
 
 OPTIONS:
   --target <N%>                 Target coverage percentage (exits when reached)
@@ -26,7 +26,7 @@ OPTIONS:
   -h, --help                    Show this help message
 
 DESCRIPTION:
-  Starts a test coverage improvement loop. Each iteration:
+  Starts a unit test coverage improvement loop. Each iteration:
   1. Runs coverage to find gaps
   2. Writes ONE meaningful test for user-facing behavior
   3. Commits with descriptive message
@@ -35,9 +35,9 @@ DESCRIPTION:
   To signal completion, output: <promise>YOUR_PHRASE</promise>
 
 EXAMPLES:
-  /test-coverage --target 80% --max-iterations 20
-  /test-coverage --test-command "bun test:coverage"
-  /test-coverage --completion-promise "ALL TESTS PASS" --max-iterations 10
+  /ut --target 80% --max-iterations 20
+  /ut --test-command "bun test:coverage"
+  /ut --completion-promise "ALL TESTS PASS" --max-iterations 10
 
 AUTO-DETECTION:
   Detects coverage tool: vitest > jest > c8 > nyc > package.json script
@@ -47,7 +47,7 @@ STOPPING:
   - Reach --target coverage percentage
   - Reach --max-iterations
   - Output <promise>COVERAGE COMPLETE</promise>
-  - Run /cancel-test-coverage
+  - Run /cancel-ut
 HELP_EOF
 }
 
@@ -175,8 +175,8 @@ if [[ -z "$TEST_COMMAND" ]]; then
     echo "No vitest.config.*, jest.config.*, c8, nyc, or coverage script found." >&2
     echo "" >&2
     echo "Please specify manually:" >&2
-    echo "  /test-coverage --test-command 'pnpm run coverage'" >&2
-    echo "  /test-coverage --test-command 'bun test:coverage'" >&2
+    echo "  /ut --test-command 'pnpm run coverage'" >&2
+    echo "  /ut --test-command 'bun test:coverage'" >&2
     exit 1
   fi
 fi
@@ -185,7 +185,7 @@ fi
 mkdir -p .claude
 
 # Create progress file if it doesn't exist
-PROGRESS_FILE=".claude/test-coverage-progress.txt"
+PROGRESS_FILE=".claude/ut-progress.txt"
 if [[ ! -f "$PROGRESS_FILE" ]]; then
   echo "# Test Coverage Progress Log" > "$PROGRESS_FILE"
   echo "# Format: JSONL - one entry per iteration" >> "$PROGRESS_FILE"
@@ -193,7 +193,7 @@ if [[ ! -f "$PROGRESS_FILE" ]]; then
 fi
 
 # Create state file
-STATE_FILE=".claude/test-coverage-loop.local.md"
+STATE_FILE=".claude/ut-loop.local.md"
 cat > "$STATE_FILE" <<EOF
 ---
 active: true
@@ -223,6 +223,24 @@ Do NOT write tests just to increase coverage numbers. Use coverage as a guide to
 
 If uncovered code is not worth testing (boilerplate, unreachable error branches, internal plumbing), add \`/* v8 ignore next */\` or \`/* v8 ignore start */\` comments instead of writing low-value tests.
 
+## Test Colocation
+
+**Tests should live next to the code they test:**
+- \`src/utils/parse.ts\` → \`src/utils/parse.test.ts\`
+- \`src/components/Button.tsx\` → \`src/components/Button.test.tsx\`
+- Shared test utilities can live in \`src/test/\` or \`__tests__/helpers/\`
+
+**Why colocation matters:**
+- Easy to find tests for a file
+- Tests get updated when code changes
+- Dead code detection (no tests = suspicious)
+
+## Code Style
+
+- **MINIMAL COMMENTS** - code should be self-documenting
+- Only add comments for non-obvious "why", never "what"
+- Test names should describe the behavior being tested
+
 ## Process (ONE test per iteration)
 
 1. Run \`$TEST_COMMAND\` to see which files have low coverage
@@ -230,9 +248,10 @@ If uncovered code is not worth testing (boilerplate, unreachable error branches,
    - Prioritize: error handling users will hit, CLI commands, API endpoints, file parsing
    - Deprioritize: internal utilities, edge cases users won't encounter, boilerplate
 3. Write ONE meaningful test that validates the feature works correctly for users
+   - Place the test file next to the source file (colocation)
 4. Run \`$TEST_COMMAND\` again - coverage should increase as a side effect of testing real behavior
 5. Commit with message: \`test(<file>): <describe the user behavior being tested>\`
-6. Append progress to \`.claude/test-coverage-progress.txt\`:
+6. Append progress to \`.claude/ut-progress.txt\`:
    \`\`\`json
    {"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","iteration":1,"file":"<file>","notes":"<what you tested>"}
    \`\`\`
@@ -252,7 +271,7 @@ EOF
 
 # Output setup message
 cat <<EOF
-Test coverage loop activated!
+Unit test loop activated!
 
 Iteration: 1
 Target: $(if awk "BEGIN {exit !($TARGET_COVERAGE > 0)}" 2>/dev/null; then echo "${TARGET_COVERAGE}%"; else echo "none"; fi)
@@ -264,5 +283,5 @@ The stop hook is now active. When you try to exit, the same prompt will be
 fed back for the next iteration until the target is reached.
 
 To complete: output <promise>$COMPLETION_PROMISE</promise>
-To cancel: /cancel-test-coverage
+To cancel: /cancel-ut
 EOF

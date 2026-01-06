@@ -472,7 +472,12 @@ Options:
 - Spec should be detailed enough to code from
 - Include file paths, function names, patterns to follow
 
-**Small Stories for Ralph**
+**Code Style Guidelines**
+- MINIMAL COMMENTS - code should be self-documenting
+- Only comment the non-obvious "why", never the "what"
+- Tests should live next to the code they test (colocation)
+
+**Small Stories for /go**
 - Each story should be completable in one iteration
 - If a story is too big, break it down
 - Clear success criteria = `passes: true`

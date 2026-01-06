@@ -185,24 +185,29 @@ started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 ## What Belongs in E2E Tests (vs Unit Tests)
 
-**E2E tests are for:**
-- Critical user journeys (signup, checkout, onboarding)
-- Multi-page flows that cross system boundaries
-- Authentication and authorization flows
-- Integration between frontend and backend
-- Visual/UI behavior users actually see
-- Happy paths that generate revenue or core value
+**E2E tests are for STATE TRANSITIONS and USER FLOWS:**
+- Login → Dashboard → Logout (auth flow)
+- Browse → Add to Cart → Checkout → Confirmation (purchase flow)
+- Signup → Email verification → Onboarding → First action
+- Multi-page navigation that crosses system boundaries
+- Flows where real browser interaction matters
+
+**Prioritize tests that verify:**
+1. User can move from state A to state B (e.g., logged out → logged in)
+2. Navigation between pages works correctly
+3. Data persists across page loads/refreshes
+4. Authentication gates work (protected routes redirect)
+5. Critical business flows that generate revenue
 
 **Leave to unit tests:**
 - Individual function logic and edge cases
 - Data transformation and validation rules
-- Error message content and formatting
+- Component rendering in isolation
 - Business logic calculations
 - API response parsing
-- State management reducers
 
-**Rule of thumb:** If you can test it without a browser, it's probably a unit test.
-E2E tests are expensive (slow, flaky) - reserve them for flows where real browser interaction matters.
+**Rule of thumb:** E2E = state transitions across pages. Unit = logic within a component.
+E2E tests are expensive (slow, flaky) - reserve them for flows where the *transition* matters.
 
 ## File Naming Convention
 
@@ -318,6 +323,19 @@ projects: [
 - **Tests must be independent** - no shared state between tests
 - **Use web-first assertions** - \`expect(locator).toBeVisible()\` auto-waits
 - **Mock external APIs** - use \`page.route()\` for third-party services
+- **MINIMAL COMMENTS** - code should be self-documenting; only add comments for non-obvious "why"
+
+## Test Colocation
+
+**Tests should live close to the code they test:**
+- E2E tests in \`$E2E_FOLDER/\` organized by feature/flow
+- Shared setup (auth, fixtures) can live in \`$E2E_FOLDER/setup/\` or \`$E2E_FOLDER/fixtures/\`
+- Page objects next to their tests: \`login.e2e.page.ts\` + \`login.e2e.ts\`
+
+**Why colocation matters:**
+- Easy to find tests for a feature
+- Tests get updated when code changes
+- Dead code detection (no tests = suspicious)
 
 ## Completion
 

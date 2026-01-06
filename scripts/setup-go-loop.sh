@@ -263,12 +263,18 @@ started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 $CURRENT_STORY
 \`\`\`
 
+## Code Style
+
+- **MINIMAL COMMENTS** - code should be self-documenting
+- Only comment the non-obvious "why", never the "what"
+- Tests should live next to the code they test (colocation)
+
 ## Your Task
 
 1. Read the full spec at \`$SPEC_PATH\`
 2. Implement story #$FIRST_INCOMPLETE: "$CURRENT_TITLE"
 3. Follow the verification steps listed in the story
-4. Write/update tests as needed
+4. Write/update tests next to the code they test
 5. Run: format, lint, tests, types (all must pass)
 6. Update \`$PRD_PATH\`: set \`passes = true\` for story $FIRST_INCOMPLETE
 7. Commit with appropriate type: \`<type>($FEATURE_NAME): story #$FIRST_INCOMPLETE - $CURRENT_TITLE\`

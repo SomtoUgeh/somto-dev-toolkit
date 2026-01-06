@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/test_coverage_stop_hook.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/ut_stop_hook.sh"
           }
         ]
       },

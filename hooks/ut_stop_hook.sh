@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Test Coverage Loop Stop Hook
-# Prevents session exit when a test-coverage loop is active
+# Unit Test Loop Stop Hook
+# Prevents session exit when a unit test loop is active
 # Feeds the same prompt back to continue the loop
 
 set -euo pipefail
@@ -9,8 +9,8 @@ set -euo pipefail
 # Read hook input from stdin
 HOOK_INPUT=$(cat)
 
-# Check if test-coverage loop is active
-STATE_FILE=".claude/test-coverage-loop.local.md"
+# Check if unit test loop is active
+STATE_FILE=".claude/ut-loop.local.md"
 
 if [[ ! -f "$STATE_FILE" ]]; then
   # No active loop - allow exit
@@ -27,22 +27,22 @@ COMPLETION_PROMISE=$(echo "$FRONTMATTER" | grep '^completion_promise:' | sed 's/
 
 # Validate numeric fields
 if [[ ! "$ITERATION" =~ ^[0-9]+$ ]]; then
-  echo "Test coverage loop: State file corrupted (invalid iteration: '$ITERATION')" >&2
-  echo "Stopping loop. Run /test-coverage again to start fresh." >&2
+  echo "Unit test loop: State file corrupted (invalid iteration: '$ITERATION')" >&2
+  echo "Stopping loop. Run /ut again to start fresh." >&2
   rm "$STATE_FILE"
   exit 0
 fi
 
 if [[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]]; then
-  echo "Test coverage loop: State file corrupted (invalid max_iterations: '$MAX_ITERATIONS')" >&2
-  echo "Stopping loop. Run /test-coverage again to start fresh." >&2
+  echo "Unit test loop: State file corrupted (invalid max_iterations: '$MAX_ITERATIONS')" >&2
+  echo "Stopping loop. Run /ut again to start fresh." >&2
   rm "$STATE_FILE"
   exit 0
 fi
 
 # Check if max iterations reached
 if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $ITERATION -ge $MAX_ITERATIONS ]]; then
-  echo "Test coverage loop: Max iterations ($MAX_ITERATIONS) reached."
+  echo "Unit test loop: Max iterations ($MAX_ITERATIONS) reached."
   rm "$STATE_FILE"
   exit 0
 fi
@@ -51,7 +51,7 @@ fi
 TRANSCRIPT_PATH=$(echo "$HOOK_INPUT" | jq -r '.transcript_path')
 
 if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
-  echo "Test coverage loop: Transcript file not found" >&2
+  echo "Unit test loop: Transcript file not found" >&2
   echo "Stopping loop." >&2
   rm "$STATE_FILE"
   exit 0
@@ -59,7 +59,7 @@ fi
 
 # Check if there are any assistant messages
 if ! grep -q '"role":"assistant"' "$TRANSCRIPT_PATH"; then
-  echo "Test coverage loop: No assistant messages found in transcript" >&2
+  echo "Unit test loop: No assistant messages found in transcript" >&2
   echo "Stopping loop." >&2
   rm "$STATE_FILE"
   exit 0
@@ -68,7 +68,7 @@ fi
 # Extract last assistant message
 LAST_LINE=$(grep '"role":"assistant"' "$TRANSCRIPT_PATH" | tail -1)
 if [[ -z "$LAST_LINE" ]]; then
-  echo "Test coverage loop: Failed to extract last assistant message" >&2
+  echo "Unit test loop: Failed to extract last assistant message" >&2
   echo "Stopping loop." >&2
   rm "$STATE_FILE"
   exit 0
@@ -83,14 +83,14 @@ LAST_OUTPUT=$(echo "$LAST_LINE" | jq -r '
 ' 2>&1)
 
 if [[ $? -ne 0 ]]; then
-  echo "Test coverage loop: Failed to parse assistant message" >&2
+  echo "Unit test loop: Failed to parse assistant message" >&2
   echo "Stopping loop." >&2
   rm "$STATE_FILE"
   exit 0
 fi
 
 if [[ -z "$LAST_OUTPUT" ]]; then
-  echo "Test coverage loop: Assistant message contained no text" >&2
+  echo "Unit test loop: Assistant message contained no text" >&2
   echo "Stopping loop." >&2
   rm "$STATE_FILE"
   exit 0
@@ -100,7 +100,7 @@ fi
 PROMISE_TEXT=$(echo "$LAST_OUTPUT" | perl -0777 -pe 's/.*?<promise>(.*?)<\/promise>.*/$1/s; s/^\s+|\s+$//g; s/\s+/ /g' 2>/dev/null || echo "")
 
 if [[ -n "$PROMISE_TEXT" ]] && [[ -n "$COMPLETION_PROMISE" ]] && [[ "$PROMISE_TEXT" = "$COMPLETION_PROMISE" ]]; then
-  echo "Test coverage loop: Detected <promise>$COMPLETION_PROMISE</promise>"
+  echo "Unit test loop: Detected <promise>$COMPLETION_PROMISE</promise>"
   echo "Coverage target achieved!"
   rm "$STATE_FILE"
   exit 0
@@ -113,8 +113,8 @@ NEXT_ITERATION=$((ITERATION + 1))
 PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
 
 if [[ -z "$PROMPT_TEXT" ]]; then
-  echo "Test coverage loop: State file corrupted (no prompt found)" >&2
-  echo "Stopping loop. Run /test-coverage again to start fresh." >&2
+  echo "Unit test loop: State file corrupted (no prompt found)" >&2
+  echo "Stopping loop. Run /ut again to start fresh." >&2
   rm "$STATE_FILE"
   exit 0
 fi
@@ -126,9 +126,9 @@ mv "$TEMP_FILE" "$STATE_FILE"
 
 # Build system message (use awk for decimal comparison)
 if awk "BEGIN {exit !($TARGET_COVERAGE > 0)}"; then
-  SYSTEM_MSG="Test coverage iteration $NEXT_ITERATION | Target: ${TARGET_COVERAGE}% | Output <promise>$COMPLETION_PROMISE</promise> when done"
+  SYSTEM_MSG="Unit test iteration $NEXT_ITERATION | Target: ${TARGET_COVERAGE}% | Output <promise>$COMPLETION_PROMISE</promise> when done"
 else
-  SYSTEM_MSG="Test coverage iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
+  SYSTEM_MSG="Unit test iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
 fi
 
 # Output JSON to block the stop and feed prompt back
