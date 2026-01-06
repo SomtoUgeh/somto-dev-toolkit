@@ -1,6 +1,6 @@
 ---
 description: "Start Playwright E2E test development loop"
-argument-hint: "[--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
+argument-hint: "[\"custom prompt\"] [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-e2e-loop.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---

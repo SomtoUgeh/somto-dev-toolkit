@@ -9,13 +9,14 @@ set -euo pipefail
 MAX_ITERATIONS=0
 TEST_COMMAND=""
 COMPLETION_PROMISE="E2E COMPLETE"
+CUSTOM_PROMPT=""
 
 show_help() {
   cat << 'HELP_EOF'
 E2E Test Loop - Iterative Playwright E2E test development
 
 USAGE:
-  /e2e [OPTIONS]
+  /e2e [OPTIONS] ["custom prompt"]
 
 OPTIONS:
   --max-iterations <n>          Maximum iterations before auto-stop (default: unlimited)
@@ -34,10 +35,16 @@ DESCRIPTION:
 
   To signal completion, output: <promise>YOUR_PHRASE</promise>
 
+CUSTOM PROMPT:
+  Optional positional argument to customize the task. Added to the default E2E instructions.
+  Example: /e2e "review existing tests and refactor to follow page object pattern"
+  Example: /e2e "focus on auth flows" --max-iterations 10
+
 EXAMPLES:
   /e2e --max-iterations 15
   /e2e --test-command "pnpm test:e2e"
   /e2e --completion-promise "ALL FLOWS TESTED" --max-iterations 20
+  /e2e "rewrite tests to use page object pattern"
 
 FILE NAMING CONVENTION:
   *.e2e.page.ts - Page objects (locators, setup, actions)
@@ -120,10 +127,19 @@ while [[ $# -gt 0 ]]; do
       COMPLETION_PROMISE="$2"
       shift 2
       ;;
-    *)
+    -*)
       echo "Unknown option: $1" >&2
       echo "Use --help for usage information" >&2
       exit 1
+      ;;
+    *)
+      # Positional argument = custom prompt
+      if [[ -n "$CUSTOM_PROMPT" ]]; then
+        CUSTOM_PROMPT="$CUSTOM_PROMPT $1"
+      else
+        CUSTOM_PROMPT="$1"
+      fi
+      shift
       ;;
   esac
 done
@@ -174,6 +190,7 @@ max_iterations: $MAX_ITERATIONS
 test_command: "$TEST_COMMAND"
 completion_promise: "$COMPLETION_PROMISE"
 e2e_folder: "$E2E_FOLDER"
+custom_prompt: "$CUSTOM_PROMPT"
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 
@@ -182,6 +199,7 @@ started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 **Test command:** \`$TEST_COMMAND\`
 **E2E folder:** \`$E2E_FOLDER/\`
 **Max iterations:** $(if [[ $MAX_ITERATIONS -gt 0 ]]; then echo "$MAX_ITERATIONS"; else echo "unlimited"; fi)
+$(if [[ -n "$CUSTOM_PROMPT" ]]; then echo -e "\n## Custom Instructions\n\n$CUSTOM_PROMPT"; fi)
 
 ## What Belongs in E2E Tests (vs Unit Tests)
 
@@ -359,6 +377,7 @@ Max iterations: $(if [[ $MAX_ITERATIONS -gt 0 ]]; then echo "$MAX_ITERATIONS"; e
 Test command: $TEST_COMMAND
 E2E folder: $E2E_FOLDER/
 Completion promise: $COMPLETION_PROMISE
+$(if [[ -n "$CUSTOM_PROMPT" ]]; then echo "Custom prompt: $CUSTOM_PROMPT"; fi)
 
 File naming convention:
   *.e2e.page.ts - Page objects (locators, setup, actions)

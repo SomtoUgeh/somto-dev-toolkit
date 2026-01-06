@@ -1,7 +1,7 @@
 ---
 name: ut
 description: "Start unit test coverage improvement loop"
-argument-hint: "[--target N%] [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
+argument-hint: "[\"custom prompt\"] [--target N%] [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-ut-loop.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---

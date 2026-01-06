@@ -10,13 +10,14 @@ TARGET_COVERAGE=0
 MAX_ITERATIONS=0
 TEST_COMMAND=""
 COMPLETION_PROMISE="COVERAGE COMPLETE"
+CUSTOM_PROMPT=""
 
 show_help() {
   cat << 'HELP_EOF'
 Unit Test Loop - Iterative unit test coverage improvement (Matt Pocock pattern)
 
 USAGE:
-  /ut [OPTIONS]
+  /ut [OPTIONS] ["custom prompt"]
 
 OPTIONS:
   --target <N%>                 Target coverage percentage (exits when reached)
@@ -24,6 +25,11 @@ OPTIONS:
   --test-command '<cmd>'        Override auto-detected coverage command
   --completion-promise '<text>' Custom promise phrase (default: COVERAGE COMPLETE)
   -h, --help                    Show this help message
+
+CUSTOM PROMPT:
+  Optional positional argument to customize the task. Added to the default instructions.
+  Example: /ut "refactor existing tests to follow AAA pattern"
+  Example: /ut "focus on error handling" --target 80%
 
 DESCRIPTION:
   Starts a unit test coverage improvement loop. Each iteration:
@@ -38,6 +44,7 @@ EXAMPLES:
   /ut --target 80% --max-iterations 20
   /ut --test-command "bun test:coverage"
   /ut --completion-promise "ALL TESTS PASS" --max-iterations 10
+  /ut "rewrite tests to follow AAA pattern"
 
 AUTO-DETECTION:
   Detects coverage tool: vitest > jest > c8 > nyc > package.json script
@@ -158,10 +165,19 @@ while [[ $# -gt 0 ]]; do
       COMPLETION_PROMISE="$2"
       shift 2
       ;;
-    *)
+    -*)
       echo "Unknown option: $1" >&2
       echo "Use --help for usage information" >&2
       exit 1
+      ;;
+    *)
+      # Positional argument = custom prompt
+      if [[ -n "$CUSTOM_PROMPT" ]]; then
+        CUSTOM_PROMPT="$CUSTOM_PROMPT $1"
+      else
+        CUSTOM_PROMPT="$1"
+      fi
+      shift
       ;;
   esac
 done
@@ -202,6 +218,7 @@ max_iterations: $MAX_ITERATIONS
 target_coverage: $TARGET_COVERAGE
 test_command: "$TEST_COMMAND"
 completion_promise: "$COMPLETION_PROMISE"
+custom_prompt: "$CUSTOM_PROMPT"
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 
@@ -210,6 +227,7 @@ started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 **Coverage command:** \`$TEST_COMMAND\`
 **Target:** $(if awk "BEGIN {exit !($TARGET_COVERAGE > 0)}" 2>/dev/null; then echo "${TARGET_COVERAGE}%"; else echo "none (use promise)"; fi)
 **Max iterations:** $(if [[ $MAX_ITERATIONS -gt 0 ]]; then echo "$MAX_ITERATIONS"; else echo "unlimited"; fi)
+$(if [[ -n "$CUSTOM_PROMPT" ]]; then echo -e "\n## Custom Instructions\n\n$CUSTOM_PROMPT"; fi)
 
 ## What Makes a Great Test
 
@@ -278,6 +296,7 @@ Target: $(if awk "BEGIN {exit !($TARGET_COVERAGE > 0)}" 2>/dev/null; then echo "
 Max iterations: $(if [[ $MAX_ITERATIONS -gt 0 ]]; then echo "$MAX_ITERATIONS"; else echo "unlimited"; fi)
 Test command: $TEST_COMMAND
 Completion promise: $COMPLETION_PROMISE
+$(if [[ -n "$CUSTOM_PROMPT" ]]; then echo "Custom prompt: $CUSTOM_PROMPT"; fi)
 
 The stop hook is now active. When you try to exit, the same prompt will be
 fed back for the next iteration until the target is reached.
