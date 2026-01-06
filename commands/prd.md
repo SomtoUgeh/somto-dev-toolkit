@@ -312,21 +312,57 @@ Parse the User Stories section from the spec and create a PRD JSON file.
 - Checkbox items like `- [ ] User can...`
 - Numbered items in User Stories section
 
+**For each story, generate:**
+- `category`: Infer from story context (functional, ui, integration, edge-case, performance)
+- `steps`: 3-7 explicit verification steps based on spec details and edge cases section
+
 **Write to `plans/<feature_name>/prd.json`:**
 
 ```json
 {
   "title": "<feature_name>",
   "stories": [
-    {"id": 1, "title": "User can create account", "passes": false, "priority": 1},
-    {"id": 2, "title": "User can login", "passes": false, "priority": 2}
+    {
+      "id": 1,
+      "title": "User can create account",
+      "category": "functional",
+      "steps": [
+        "Navigate to signup page",
+        "Fill required fields (email, password)",
+        "Submit registration form",
+        "Verify user record created in database",
+        "Verify redirect to dashboard"
+      ],
+      "passes": false,
+      "priority": 1
+    },
+    {
+      "id": 2,
+      "title": "User can login",
+      "category": "functional",
+      "steps": [
+        "Navigate to login page",
+        "Enter valid credentials",
+        "Submit login form",
+        "Verify session created",
+        "Verify redirect to dashboard"
+      ],
+      "passes": false,
+      "priority": 2
+    }
   ],
   "created_at": "<iso8601_timestamp>",
   "source_spec": "plans/<feature_name>/spec.md"
 }
 ```
 
-All stories start with `passes: false`. Priority is order of appearance (1 = first).
+**Story fields:**
+- `id`: Stable reference for progress.txt
+- `title`: Brief description
+- `category`: `functional`, `ui`, `integration`, `edge-case`, `performance`
+- `steps`: Explicit verification steps (agent knows when done)
+- `passes`: Starts `false`, set `true` when all steps verified
+- `priority`: Processing order (1 = first)
 
 ### Phase 5: Create Progress File
 
@@ -415,8 +451,8 @@ For each story where passes=false (in priority order):
   e. If tests fail:
      - Append to progress.txt: {\"ts\":\"<now>\",\"story_id\":<id>,\"status\":\"FAILED\",\"notes\":\"<error>\"}
      - Fix and retry
-
-Commit changes in logical chunks. Keep CI green (format, lint, tests + types must pass).
+  f. Commit changes in logical chunks, keeping the CI green (format, lint, tests + types must pass).
+  g. ONLY WORK ON A SINGLE STORY AT A TIME
 
 Output <promise>All stories pass</promise> when ALL stories have passes=true" --completion-promise "All stories pass" --max-iterations <recommended_max_iterations>
 ```
