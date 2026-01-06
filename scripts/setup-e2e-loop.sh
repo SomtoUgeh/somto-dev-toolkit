@@ -227,6 +227,10 @@ $(if [[ -n "$CUSTOM_PROMPT" ]]; then echo -e "\n## Custom Instructions\n\n$CUSTO
 **Rule of thumb:** E2E = state transitions across pages. Unit = logic within a component.
 E2E tests are expensive (slow, flaky) - reserve them for flows where the *transition* matters.
 
+## FORBIDDEN
+
+**NEVER modify test config to exclude files/folders from coverage or test runs.** This is cheating. The goal is to write tests, not to game metrics by hiding untested code.
+
 ## File Naming Convention
 
 - \`*.e2e.page.ts\` - Page objects (locators, setup, actions)

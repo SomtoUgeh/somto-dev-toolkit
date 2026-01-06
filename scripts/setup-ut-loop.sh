@@ -241,6 +241,12 @@ Do NOT write tests just to increase coverage numbers. Use coverage as a guide to
 
 If uncovered code is not worth testing (boilerplate, unreachable error branches, internal plumbing), add \`/* v8 ignore next */\` or \`/* v8 ignore start */\` comments instead of writing low-value tests.
 
+## FORBIDDEN
+
+**NEVER modify coverage config to exclude files/folders.** This is cheating. The goal is to write tests, not to game metrics by hiding untested code. If you find yourself wanting to exclude something, either:
+1. Write a test for it
+2. Use inline ignore comments for specific lines that genuinely don't need tests
+
 ## Test Colocation
 
 **Tests should live next to the code they test:**
