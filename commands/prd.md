@@ -426,40 +426,17 @@ Return:
 
 Store `<recommended_max_iterations>` value for Phase 6.
 
-### Phase 6: Generate Ralph Command
+### Phase 6: Generate Work Command
 
-Build the ralph-loop command with correct file paths:
+Build the work command with the PRD path:
 
 ```
-/ralph-wiggum:ralph-loop "Execute PRD at plans/<feature_name>/prd.json
-
-1. Read plans/<feature_name>/spec.md
-2. Read plans/<feature_name>/prd.json
-3. Read plans/<feature_name>/progress.txt for context
-
-Read all files in their entirety.
-
-Create a new branch for this feature (use branch naming convention from CLAUDE.md/project description, or default to `feat/<feature_name>`).
-
-For each story where passes=false (in priority order):
-  a. Implement the story
-  b. Write/update tests
-  c. Run format, lint, tests, and types
-  d. If tests pass:
-     - Update PRD: set story.passes = true
-     - Append to progress.txt: {\"ts\":\"<now>\",\"story_id\":<id>,\"status\":\"PASSED\",\"notes\":\"<summary>\"}
-  e. If tests fail:
-     - Append to progress.txt: {\"ts\":\"<now>\",\"story_id\":<id>,\"status\":\"FAILED\",\"notes\":\"<error>\"}
-     - Fix and retry
-  f. Commit changes in logical chunks, keeping the CI green (format, lint, tests + types must pass).
-  g. ONLY WORK ON A SINGLE STORY AT A TIME
-
-Output <promise>All stories pass</promise> when ALL stories have passes=true" --completion-promise "All stories pass" --max-iterations <recommended_max_iterations>
+/work plans/<feature_name>/prd.json --max-iterations <recommended_max_iterations>
 ```
 
 **Copy command to clipboard using Bash:**
 ```bash
-echo '<command>' | pbcopy
+echo '/work plans/<feature_name>/prd.json --max-iterations <recommended_max_iterations>' | pbcopy
 ```
 
 **Then use AskUserQuestion:**
@@ -468,10 +445,10 @@ echo '<command>' | pbcopy
 - `plans/<feature_name>/prd.json`
 - `plans/<feature_name>/progress.txt`
 
-Ralph command copied to clipboard. What next?"
+Work command copied to clipboard. What next?"
 
 Options:
-- **Run ralph-loop now** - Paste and execute immediately
+- **Run /work now** - Paste and execute immediately
 - **Done** - Files ready for later
 
 ---

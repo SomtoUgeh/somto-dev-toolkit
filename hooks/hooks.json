@@ -28,6 +28,14 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/e2e_stop_hook.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/work_stop_hook.sh"
+          }
+        ]
       }
     ]
   }

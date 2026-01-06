@@ -12,11 +12,11 @@
       "name": "somto-dev-toolkit",
       "source": "./",
       "description": "Personal collection of Claude Code tools and skills",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "author": {
         "name": "Somto Odera"
       },
-      "keywords": ["blog", "writing", "svg", "diagrams", "interview", "spec", "git-guard", "safety", "test-coverage", "e2e", "playwright"]
+      "keywords": ["blog", "writing", "svg", "diagrams", "interview", "spec", "git-guard", "safety", "test-coverage", "e2e", "playwright", "work", "prd"]
     }
   ]
 }
