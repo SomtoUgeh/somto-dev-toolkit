@@ -124,7 +124,7 @@ while [[ $# -gt 0 ]]; do
       fi
       # Strip % if present
       TARGET_COVERAGE="${2%\%}"
-      if ! [[ "$TARGET_COVERAGE" =~ ^[0-9]+$ ]]; then
+      if ! [[ "$TARGET_COVERAGE" =~ ^[0-9]+\.?[0-9]*$ ]]; then
         echo "Error: --target must be a number, got: $2" >&2
         exit 1
       fi
@@ -208,7 +208,7 @@ started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Test Coverage Improvement Loop
 
 **Coverage command:** \`$TEST_COMMAND\`
-**Target:** $(if [[ $TARGET_COVERAGE -gt 0 ]]; then echo "${TARGET_COVERAGE}%"; else echo "none (use promise)"; fi)
+**Target:** $(if awk "BEGIN {exit !($TARGET_COVERAGE > 0)}" 2>/dev/null; then echo "${TARGET_COVERAGE}%"; else echo "none (use promise)"; fi)
 **Max iterations:** $(if [[ $MAX_ITERATIONS -gt 0 ]]; then echo "$MAX_ITERATIONS"; else echo "unlimited"; fi)
 
 ## What Makes a Great Test
@@ -241,7 +241,7 @@ If uncovered code is not worth testing (boilerplate, unreachable error branches,
 
 ONLY WRITE ONE TEST PER ITERATION.
 
-$(if [[ $TARGET_COVERAGE -gt 0 ]]; then echo "When coverage reaches ${TARGET_COVERAGE}% or higher, output:"; else echo "When you believe coverage is complete, output:"; fi)
+$(if awk "BEGIN {exit !($TARGET_COVERAGE > 0)}" 2>/dev/null; then echo "When coverage reaches ${TARGET_COVERAGE}% or higher, output:"; else echo "When you believe coverage is complete, output:"; fi)
 
 \`\`\`
 <promise>$COMPLETION_PROMISE</promise>
@@ -255,7 +255,7 @@ cat <<EOF
 Test coverage loop activated!
 
 Iteration: 1
-Target: $(if [[ $TARGET_COVERAGE -gt 0 ]]; then echo "${TARGET_COVERAGE}%"; else echo "none"; fi)
+Target: $(if awk "BEGIN {exit !($TARGET_COVERAGE > 0)}" 2>/dev/null; then echo "${TARGET_COVERAGE}%"; else echo "none"; fi)
 Max iterations: $(if [[ $MAX_ITERATIONS -gt 0 ]]; then echo "$MAX_ITERATIONS"; else echo "unlimited"; fi)
 Test command: $TEST_COMMAND
 Completion promise: $COMPLETION_PROMISE

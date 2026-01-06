@@ -1,0 +1,333 @@
+#!/bin/bash
+
+# E2E Test Loop Setup Script
+# Creates state file for in-session Playwright E2E test loop
+
+set -euo pipefail
+
+# Defaults
+MAX_ITERATIONS=0
+TEST_COMMAND=""
+COMPLETION_PROMISE="E2E COMPLETE"
+
+show_help() {
+  cat << 'HELP_EOF'
+E2E Test Loop - Iterative Playwright E2E test development
+
+USAGE:
+  /e2e [OPTIONS]
+
+OPTIONS:
+  --max-iterations <n>          Maximum iterations before auto-stop (default: unlimited)
+  --test-command '<cmd>'        Override default test command (default: npx playwright test)
+  --completion-promise '<text>' Custom promise phrase (default: E2E COMPLETE)
+  -h, --help                    Show this help message
+
+DESCRIPTION:
+  Starts an E2E test development loop. Each iteration:
+  1. Identifies missing E2E coverage for user flows
+  2. Creates page object if needed (*.e2e.page.ts)
+  3. Writes ONE E2E test (*.e2e.ts)
+  4. Runs tests to verify
+  5. Commits with descriptive message
+  6. Repeats until complete
+
+  To signal completion, output: <promise>YOUR_PHRASE</promise>
+
+EXAMPLES:
+  /e2e --max-iterations 15
+  /e2e --test-command "pnpm test:e2e"
+  /e2e --completion-promise "ALL FLOWS TESTED" --max-iterations 20
+
+FILE NAMING CONVENTION:
+  *.e2e.page.ts - Page objects (locators, setup, actions)
+  *.e2e.ts      - Test files (concise tests using page objects)
+
+STOPPING:
+  - Reach --max-iterations
+  - Output <promise>E2E COMPLETE</promise>
+  - Run /cancel-e2e
+HELP_EOF
+}
+
+detect_package_manager() {
+  if [[ -f "pnpm-lock.yaml" ]]; then
+    echo "pnpm"
+  elif [[ -f "bun.lockb" ]]; then
+    echo "bun"
+  elif [[ -f "yarn.lock" ]]; then
+    echo "yarn"
+  else
+    echo "npm"
+  fi
+}
+
+detect_playwright() {
+  # Check for playwright config
+  if [[ -f "playwright.config.ts" ]] || [[ -f "playwright.config.js" ]]; then
+    return 0
+  fi
+  # Check package.json for playwright
+  if [[ -f "package.json" ]] && grep -q '"@playwright/test"' package.json 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+detect_e2e_folder() {
+  # Common E2E folder locations
+  for folder in "e2e" "tests/e2e" "test/e2e" "tests" "__tests__/e2e"; do
+    if [[ -d "$folder" ]]; then
+      echo "$folder"
+      return
+    fi
+  done
+  echo "e2e"  # Default
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    --max-iterations)
+      if [[ -z "${2:-}" ]]; then
+        echo "Error: --max-iterations requires a number" >&2
+        exit 1
+      fi
+      if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+        echo "Error: --max-iterations must be a positive integer, got: $2" >&2
+        exit 1
+      fi
+      MAX_ITERATIONS="$2"
+      shift 2
+      ;;
+    --test-command)
+      if [[ -z "${2:-}" ]]; then
+        echo "Error: --test-command requires a command string" >&2
+        exit 1
+      fi
+      TEST_COMMAND="$2"
+      shift 2
+      ;;
+    --completion-promise)
+      if [[ -z "${2:-}" ]]; then
+        echo "Error: --completion-promise requires a text argument" >&2
+        exit 1
+      fi
+      COMPLETION_PROMISE="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Use --help for usage information" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Detect package manager early for messages
+PM=$(detect_package_manager)
+
+# Check for Playwright
+if ! detect_playwright; then
+  echo "Warning: No playwright.config.ts/js found." >&2
+  if [[ "$PM" == "bun" ]]; then
+    echo "Make sure Playwright is installed: bun create playwright" >&2
+  elif [[ "$PM" == "yarn" ]]; then
+    echo "Make sure Playwright is installed: yarn create playwright" >&2
+  elif [[ "$PM" == "pnpm" ]]; then
+    echo "Make sure Playwright is installed: pnpm create playwright" >&2
+  else
+    echo "Make sure Playwright is installed: npm init playwright@latest" >&2
+  fi
+fi
+
+# Set default test command
+if [[ -z "$TEST_COMMAND" ]]; then
+  TEST_COMMAND="npx playwright test"
+fi
+
+# Detect E2E folder
+E2E_FOLDER=$(detect_e2e_folder)
+
+# Create .claude directory if needed
+mkdir -p .claude
+
+# Create progress file if it doesn't exist
+PROGRESS_FILE=".claude/e2e-progress.txt"
+if [[ ! -f "$PROGRESS_FILE" ]]; then
+  echo "# E2E Test Progress Log" > "$PROGRESS_FILE"
+  echo "# Format: JSONL - one entry per iteration" >> "$PROGRESS_FILE"
+  echo "" >> "$PROGRESS_FILE"
+fi
+
+# Create state file
+STATE_FILE=".claude/e2e-loop.local.md"
+cat > "$STATE_FILE" <<EOF
+---
+active: true
+iteration: 1
+max_iterations: $MAX_ITERATIONS
+test_command: "$TEST_COMMAND"
+completion_promise: "$COMPLETION_PROMISE"
+e2e_folder: "$E2E_FOLDER"
+started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+---
+
+# E2E Test Development Loop
+
+**Test command:** \`$TEST_COMMAND\`
+**E2E folder:** \`$E2E_FOLDER/\`
+**Max iterations:** $(if [[ $MAX_ITERATIONS -gt 0 ]]; then echo "$MAX_ITERATIONS"; else echo "unlimited"; fi)
+
+## File Naming Convention
+
+- \`*.e2e.page.ts\` - Page objects (locators, setup, actions)
+- \`*.e2e.ts\` - Test files (concise tests using page objects)
+
+Example structure:
+\`\`\`
+$E2E_FOLDER/
+├── login.e2e.page.ts       # Page object
+├── login.e2e.ts            # Tests
+├── checkout.e2e.page.ts
+├── checkout.e2e.ts
+├── base.e2e.page.ts        # Base page object
+\`\`\`
+
+## Page Object Pattern (*.e2e.page.ts)
+
+Page objects encapsulate setup and interactions:
+
+\`\`\`typescript
+// login.e2e.page.ts
+import { Page } from '@playwright/test';
+
+export class LoginPage {
+  constructor(private page: Page) {}
+
+  // Locators (use semantic selectors)
+  emailInput = () => this.page.getByLabel('Email');
+  passwordInput = () => this.page.getByLabel('Password');
+  submitButton = () => this.page.getByRole('button', { name: 'Sign in' });
+
+  // Navigation
+  async goto() {
+    await this.page.goto('/login');
+  }
+
+  // Actions
+  async login(email: string, password: string) {
+    await this.emailInput().fill(email);
+    await this.passwordInput().fill(password);
+    await this.submitButton().click();
+  }
+}
+\`\`\`
+
+## Test File Pattern (*.e2e.ts)
+
+Tests should be concise, using page objects:
+
+\`\`\`typescript
+// login.e2e.ts
+import { test, expect } from '@playwright/test';
+import { LoginPage } from './login.e2e.page';
+
+test('user can login with valid credentials', async ({ page }) => {
+  const loginPage = new LoginPage(page);
+  await loginPage.goto();
+  await loginPage.login('user@example.com', 'password');
+  await expect(page).toHaveURL('/dashboard');
+});
+\`\`\`
+
+## Locator Priority (Use in Order)
+
+1. \`getByRole()\` - buttons, links, headings (most resilient)
+2. \`getByLabel()\` - form inputs
+3. \`getByText()\` - static text content
+4. \`getByTestId()\` - when semantic locators don't work
+5. **Avoid**: CSS selectors, XPath
+
+## Authentication Pattern
+
+For authenticated tests, use setup project:
+
+\`\`\`typescript
+// auth.setup.ts
+import { test as setup } from '@playwright/test';
+
+setup('authenticate', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill('user@example.com');
+  await page.getByLabel('Password').fill('password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.context().storageState({ path: 'playwright/.auth/user.json' });
+});
+\`\`\`
+
+Then in playwright.config.ts:
+\`\`\`typescript
+projects: [
+  { name: 'setup', testMatch: /.*\.setup\.ts/ },
+  { name: 'chromium', dependencies: ['setup'], use: { storageState: 'playwright/.auth/user.json' } },
+]
+\`\`\`
+
+## Process (ONE test per iteration)
+
+1. Identify a user flow that lacks E2E coverage
+2. Create or update the page object (\`*.e2e.page.ts\`) if needed
+3. Write ONE focused E2E test (\`*.e2e.ts\`)
+4. Run \`$TEST_COMMAND\` to verify the test passes
+5. Commit with message: \`test(e2e): <describe the user flow tested>\`
+6. Append progress to \`.claude/e2e-progress.txt\`:
+   \`\`\`json
+   {"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","iteration":1,"file":"<file>","flow":"<user flow>"}
+   \`\`\`
+
+## Test Best Practices
+
+- **Test user-visible behavior** - not implementation details
+- **One flow per test** - keep tests focused
+- **Tests must be independent** - no shared state between tests
+- **Use web-first assertions** - \`expect(locator).toBeVisible()\` auto-waits
+- **Mock external APIs** - use \`page.route()\` for third-party services
+
+## Completion
+
+ONLY WRITE ONE TEST PER ITERATION.
+
+When all critical user flows are covered, output:
+
+\`\`\`
+<promise>$COMPLETION_PROMISE</promise>
+\`\`\`
+
+CRITICAL: Only output this promise when E2E coverage is genuinely complete. Do not lie to exit the loop.
+EOF
+
+# Output setup message
+cat <<EOF
+E2E test loop activated!
+
+Iteration: 1
+Max iterations: $(if [[ $MAX_ITERATIONS -gt 0 ]]; then echo "$MAX_ITERATIONS"; else echo "unlimited"; fi)
+Test command: $TEST_COMMAND
+E2E folder: $E2E_FOLDER/
+Completion promise: $COMPLETION_PROMISE
+
+File naming convention:
+  *.e2e.page.ts - Page objects (locators, setup, actions)
+  *.e2e.ts      - Test files (concise, use page objects)
+
+The stop hook is now active. When you try to exit, the same prompt will be
+fed back for the next iteration until E2E coverage is complete.
+
+To complete: output <promise>$COMPLETION_PROMISE</promise>
+To cancel: /cancel-e2e
+EOF
