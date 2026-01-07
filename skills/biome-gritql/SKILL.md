@@ -36,7 +36,7 @@ Add to `biome.json`:
 }
 ```
 
-Run: `bunx biome check`
+Run: `bunx biome check` or any equivalent command to run linter in the codebase
 
 ## GritQL Syntax
 
@@ -51,6 +51,13 @@ Run: `bunx biome check`
     )
 }
 ```
+
+make sure to read documentation
+
+- [BiomeJS Documentation](https://biomejs.dev/)
+- [Blog examples](https://laulau.land/context-window-ate-your-instructions/)
+- [BiomeJS GitHub Repository](https://github.com/biomejs/biome)
+- [GritQL GitHub Repository](https://github.com/biomejs/gritql)
 
 ### Variables
 
@@ -183,3 +190,11 @@ project/
 ## Why This Matters
 
 Instructions in CLAUDE.md degrade as context fills up. Linter rules provide immediate, persistent feedback. When Claude violates a pattern, it sees the error and self-corrects - no context drift.
+
+
+# Resources 
+
+- [BiomeJS Documentation](https://biomejs.dev/)
+- [Blog examples](https://laulau.land/context-window-ate-your-instructions/)
+- [BiomeJS GitHub Repository](https://github.com/biomejs/biome)
+- [GritQL GitHub Repository](https://github.com/biomejs/gritql)
