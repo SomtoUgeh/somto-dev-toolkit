@@ -242,7 +242,7 @@ EOF
       else
         # Story passes but no commit - remind to commit
         NEXT_ITERATION=$((ITERATION + 1))
-        TEMP_FILE="${STATE_FILE}.tmp.$$"
+        TEMP_FILE="/tmp/go-loop-state.tmp.$$"
         sed "s/^iteration: .*/iteration: $NEXT_ITERATION/" "$STATE_FILE" > "$TEMP_FILE"
         mv "$TEMP_FILE" "$STATE_FILE"
 
@@ -264,8 +264,8 @@ fi
 # =============================================================================
 NEXT_ITERATION=$((ITERATION + 1))
 
-# Update iteration in state file
-TEMP_FILE="${STATE_FILE}.tmp.$$"
+# Update iteration in state file (use /tmp to avoid Claude Code watcher race condition)
+TEMP_FILE="/tmp/loop-state.tmp.$$"
 sed "s/^iteration: .*/iteration: $NEXT_ITERATION/" "$STATE_FILE" > "$TEMP_FILE"
 mv "$TEMP_FILE" "$STATE_FILE"
 
