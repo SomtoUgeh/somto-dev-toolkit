@@ -41,7 +41,7 @@ For PRD-based development. Auto-detects `.json` files or `--prd` flag.
 **Run setup:**
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/setup-work-loop.sh <args>
+${CLAUDE_PLUGIN_ROOT}/scripts/setup-go-loop.sh <args>
 ```
 
 **Then read the generated state file at `.claude/go-loop.local.md` and begin work.**
