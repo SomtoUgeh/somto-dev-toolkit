@@ -4,17 +4,17 @@
 # Dual-mode: Generic (ralph-wiggum style) or PRD-aware
 #
 # Generic mode:
-#   setup-go-loop.sh "Your prompt" --completion-promise "DONE" [--max-iterations N]
+#   setup-go-loop.sh Build a CSV parser --completion-promise "DONE"
 #
 # PRD mode:
-#   setup-go-loop.sh --prd plans/feature/prd.json [--max-iterations N]
-#   setup-go-loop.sh plans/feature/prd.json  # auto-detect .json
+#   setup-go-loop.sh plans/feature/prd.json
+#   setup-go-loop.sh --prd plans/feature/prd.json
 
 set -euo pipefail
 
 # Defaults
 MODE=""
-PROMPT=""
+PROMPT_PARTS=()
 PRD_PATH=""
 MAX_ITERATIONS=50
 COMPLETION_PROMISE=""
@@ -24,12 +24,12 @@ show_help() {
 Go Loop - Iterative task execution (generic or PRD-aware)
 
 USAGE:
-  /go "<prompt>" --completion-promise "DONE" [OPTIONS]
-  /go --prd <prd.json> [OPTIONS]
+  /go PROMPT... --completion-promise "DONE" [OPTIONS]
   /go <prd.json> [OPTIONS]
+  /go --prd <prd.json> [OPTIONS]
 
 MODES:
-  Generic: Provide a prompt and completion promise (ralph-wiggum style)
+  Generic: Provide a prompt and completion promise
   PRD:     Provide a prd.json file (auto-detects by .json extension)
 
 OPTIONS:
@@ -40,12 +40,13 @@ OPTIONS:
 
 GENERIC MODE:
   Loops until you output <promise>YOUR_TEXT</promise>
-  Example: /go "Build a CSV parser" --completion-promise "PARSER COMPLETE"
+  Multi-word prompts work without quotes:
+    /go Build a CSV parser with validation --completion-promise "DONE"
 
 PRD MODE:
   Loops through stories until all have passes=true
   Auto-commits per story, auto-updates progress.txt
-  Example: /go plans/auth/prd.json
+    /go plans/auth/prd.json
 
 STOPPING:
   Generic: output <promise>TEXT</promise>
@@ -55,7 +56,6 @@ HELP_EOF
 }
 
 # Parse arguments
-POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]; do
   case $1 in
     -h|--help)
@@ -65,6 +65,12 @@ while [[ $# -gt 0 ]]; do
     --prd)
       if [[ -z "${2:-}" ]]; then
         echo "Error: --prd requires a file path" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --prd plans/auth/prd.json" >&2
+        echo "    --prd ./my-feature/prd.json" >&2
+        echo "" >&2
+        echo "  You provided: --prd (with no path)" >&2
         exit 1
       fi
       PRD_PATH="$2"
@@ -74,6 +80,15 @@ while [[ $# -gt 0 ]]; do
     --completion-promise)
       if [[ -z "${2:-}" ]]; then
         echo "Error: --completion-promise requires a text argument" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --completion-promise 'DONE'" >&2
+        echo "    --completion-promise 'TASK COMPLETE'" >&2
+        echo "    --completion-promise 'All tests passing'" >&2
+        echo "" >&2
+        echo "  You provided: --completion-promise (with no text)" >&2
+        echo "" >&2
+        echo "  Note: Multi-word promises must be quoted!" >&2
         exit 1
       fi
       COMPLETION_PROMISE="$2"
@@ -81,46 +96,75 @@ while [[ $# -gt 0 ]]; do
       ;;
     --max-iterations)
       if [[ -z "${2:-}" ]]; then
-        echo "Error: --max-iterations requires a number" >&2
+        echo "Error: --max-iterations requires a number argument" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --max-iterations 10" >&2
+        echo "    --max-iterations 50" >&2
+        echo "    --max-iterations 100" >&2
+        echo "" >&2
+        echo "  You provided: --max-iterations (with no number)" >&2
         exit 1
       fi
       if ! [[ "$2" =~ ^[0-9]+$ ]]; then
         echo "Error: --max-iterations must be a positive integer, got: $2" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --max-iterations 10" >&2
+        echo "    --max-iterations 50" >&2
+        echo "" >&2
+        echo "  Invalid: decimals (10.5), negative numbers (-5), text" >&2
         exit 1
       fi
       MAX_ITERATIONS="$2"
       shift 2
       ;;
     -*)
-      echo "Unknown option: $1" >&2
-      echo "Use --help for usage information" >&2
+      echo "Error: Unknown option: $1" >&2
+      echo "" >&2
+      echo "  Valid options:" >&2
+      echo "    --prd <path>                  PRD file path" >&2
+      echo "    --completion-promise <text>   Promise phrase" >&2
+      echo "    --max-iterations <n>          Safety limit" >&2
+      echo "    -h, --help                    Show help" >&2
+      echo "" >&2
+      echo "  Use --help for full usage information" >&2
       exit 1
       ;;
     *)
-      POSITIONAL_ARGS+=("$1")
+      # Non-option argument - collect as prompt part or detect PRD
+      if [[ "$1" == *.json ]]; then
+        PRD_PATH="$1"
+        MODE="prd"
+      else
+        PROMPT_PARTS+=("$1")
+      fi
       shift
       ;;
   esac
 done
 
-# Process positional args
-if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
-  FIRST_ARG="${POSITIONAL_ARGS[0]}"
+# Join all prompt parts with spaces
+PROMPT="${PROMPT_PARTS[*]:-}"
 
-  # Auto-detect PRD mode if arg ends in .json
-  if [[ "$FIRST_ARG" == *.json ]]; then
-    PRD_PATH="$FIRST_ARG"
-    MODE="prd"
-  else
-    PROMPT="$FIRST_ARG"
-    MODE="generic"
-  fi
+# Determine mode if not already set
+if [[ -z "$MODE" ]] && [[ -n "$PROMPT" ]]; then
+  MODE="generic"
 fi
 
 # Validate based on mode
 if [[ -z "$MODE" ]]; then
   echo "Error: No prompt or PRD file provided" >&2
-  echo "Use --help for usage information" >&2
+  echo "" >&2
+  echo "  Generic mode examples:" >&2
+  echo "    /go Build a REST API --completion-promise 'DONE'" >&2
+  echo "    /go Fix the auth bug --completion-promise 'BUG FIXED'" >&2
+  echo "" >&2
+  echo "  PRD mode examples:" >&2
+  echo "    /go plans/auth/prd.json" >&2
+  echo "    /go --prd plans/feature/prd.json" >&2
+  echo "" >&2
+  echo "  For all options: /go --help" >&2
   exit 1
 fi
 
@@ -133,13 +177,31 @@ if [[ "$MODE" == "generic" ]]; then
   # Generic mode validation
   if [[ -z "$PROMPT" ]]; then
     echo "Error: No prompt provided for generic mode" >&2
+    echo "" >&2
+    echo "  Go loop needs a task description to work on." >&2
+    echo "" >&2
+    echo "  Examples:" >&2
+    echo "    /go Build a REST API for todos --completion-promise 'DONE'" >&2
+    echo "    /go Fix the auth bug --max-iterations 20 --completion-promise 'FIXED'" >&2
+    echo "" >&2
+    echo "  For all options: /go --help" >&2
     exit 1
   fi
   if [[ -z "$COMPLETION_PROMISE" ]]; then
     echo "Error: --completion-promise required for generic mode" >&2
-    echo "Example: /go \"Your task\" --completion-promise \"DONE\"" >&2
+    echo "" >&2
+    echo "  Generic mode needs a completion promise to know when to stop." >&2
+    echo "" >&2
+    echo "  Examples:" >&2
+    echo "    /go \"$PROMPT\" --completion-promise 'DONE'" >&2
+    echo "    /go \"$PROMPT\" --completion-promise 'TASK COMPLETE'" >&2
+    echo "" >&2
+    echo "  Note: Multi-word promises must be quoted!" >&2
     exit 1
   fi
+
+  # Quote completion promise for YAML
+  COMPLETION_PROMISE_YAML="\"$COMPLETION_PROMISE\""
 
   # Create generic mode state file
   cat > "$STATE_FILE" <<EOF
@@ -148,7 +210,7 @@ mode: "generic"
 active: true
 iteration: 1
 max_iterations: $MAX_ITERATIONS
-completion_promise: "$COMPLETION_PROMISE"
+completion_promise: $COMPLETION_PROMISE_YAML
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 
@@ -178,20 +240,56 @@ Completion promise: $COMPLETION_PROMISE
 The stop hook is now active. When you try to exit, the same prompt will be
 fed back for the next iteration until you output the completion promise.
 
-To complete: output <promise>$COMPLETION_PROMISE</promise>
 To cancel: /cancel-go
 EOF
+
+  # Display prompt
+  echo ""
+  echo "$PROMPT"
+
+  # Display completion promise requirements
+  echo ""
+  echo "========================================================================"
+  echo "CRITICAL - Go Loop Completion Promise"
+  echo "========================================================================"
+  echo ""
+  echo "To complete this loop, output this EXACT text:"
+  echo "  <promise>$COMPLETION_PROMISE</promise>"
+  echo ""
+  echo "STRICT REQUIREMENTS:"
+  echo "  - Use <promise> XML tags EXACTLY as shown above"
+  echo "  - The statement MUST be completely and unequivocally TRUE"
+  echo "  - Do NOT output false statements to exit the loop"
+  echo "  - Do NOT lie even if you think you should exit"
+  echo ""
+  echo "If you believe you're stuck or the task is impossible, keep trying."
+  echo "The loop continues until the promise is GENUINELY TRUE."
+  echo "========================================================================"
 
 else
   # PRD mode validation
   if [[ ! -f "$PRD_PATH" ]]; then
     echo "Error: PRD file not found: $PRD_PATH" >&2
+    echo "" >&2
+    echo "  Make sure the file exists and the path is correct." >&2
+    echo "" >&2
+    echo "  Expected structure:" >&2
+    echo "    plans/<feature>/prd.json" >&2
+    echo "    plans/<feature>/spec.md" >&2
+    echo "" >&2
+    echo "  Create a PRD using: /prd <feature description>" >&2
     exit 1
   fi
 
   # Validate JSON
   if ! jq empty "$PRD_PATH" 2>/dev/null; then
     echo "Error: Invalid JSON in PRD file: $PRD_PATH" >&2
+    echo "" >&2
+    echo "  The file exists but contains invalid JSON." >&2
+    echo "  Check for syntax errors like:" >&2
+    echo "    - Missing commas between fields" >&2
+    echo "    - Unquoted strings" >&2
+    echo "    - Trailing commas" >&2
     exit 1
   fi
 
@@ -199,13 +297,18 @@ else
   STORY_COUNT=$(jq '.stories | length' "$PRD_PATH")
   if [[ "$STORY_COUNT" -eq 0 ]]; then
     echo "Error: No stories found in PRD file" >&2
+    echo "" >&2
+    echo "  PRD file must have a 'stories' array with at least one story." >&2
+    echo "" >&2
+    echo "  Example structure:" >&2
+    echo '    {"stories": [{"id": 1, "title": "...", "passes": false}]}' >&2
     exit 1
   fi
 
   # Find first incomplete story
   FIRST_INCOMPLETE=$(jq -r '[.stories[] | select(.passes == false)] | first | .id // empty' "$PRD_PATH")
   if [[ -z "$FIRST_INCOMPLETE" ]]; then
-    echo "All stories already pass! Nothing to do." >&2
+    echo "All stories already pass! Nothing to do."
     exit 0
   fi
 

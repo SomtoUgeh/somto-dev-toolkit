@@ -25,9 +25,10 @@ Each iteration, you must:
 1. **Identify a user flow** that lacks E2E coverage
 2. **Create page object** (`*.e2e.page.ts`) if needed for that flow
 3. **Write ONE E2E test** (`*.e2e.ts`) that validates the flow
-4. **Run tests** to verify the test passes
-5. **Commit** with message: `test(e2e): <describe the user flow>`
-6. **Log progress** to `.claude/e2e-progress.txt`
+4. **Run lint, format, and typecheck** the equivalent command in the codebase to ensure code quality
+5. **Run tests** to verify the test passes
+6. **Commit** with message: `test(e2e): <describe the user flow>`
+7. **Log progress** to `.claude/e2e-progress.txt`
 
 ## File Naming Convention
 
@@ -41,6 +42,8 @@ Each iteration, you must:
 - **Tests must be independent** - no shared state between tests
 - **Use semantic locators** - getByRole > getByLabel > getByText > getByTestId
 - **Create page objects** - keep tests concise by extracting setup to page objects
+- **Log progress** - Make sure to log progress to `.claude/e2e-progress.txt` after each successful test run.
+- **Ensure code quality** - Run lint, format, and typecheck before committing
 
 ## Completion
 

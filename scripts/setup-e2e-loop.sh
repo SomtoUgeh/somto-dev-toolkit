@@ -9,7 +9,7 @@ set -euo pipefail
 MAX_ITERATIONS=0
 TEST_COMMAND=""
 COMPLETION_PROMISE="E2E COMPLETE"
-CUSTOM_PROMPT=""
+CUSTOM_PROMPT_PARTS=()
 
 show_help() {
   cat << 'HELP_EOF'
@@ -101,11 +101,24 @@ while [[ $# -gt 0 ]]; do
       ;;
     --max-iterations)
       if [[ -z "${2:-}" ]]; then
-        echo "Error: --max-iterations requires a number" >&2
+        echo "Error: --max-iterations requires a number argument" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --max-iterations 10" >&2
+        echo "    --max-iterations 50" >&2
+        echo "    --max-iterations 100" >&2
+        echo "" >&2
+        echo "  You provided: --max-iterations (with no number)" >&2
         exit 1
       fi
       if ! [[ "$2" =~ ^[0-9]+$ ]]; then
         echo "Error: --max-iterations must be a positive integer, got: $2" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --max-iterations 10" >&2
+        echo "    --max-iterations 50" >&2
+        echo "" >&2
+        echo "  Invalid: decimals (10.5), negative numbers (-5), text" >&2
         exit 1
       fi
       MAX_ITERATIONS="$2"
@@ -114,6 +127,13 @@ while [[ $# -gt 0 ]]; do
     --test-command)
       if [[ -z "${2:-}" ]]; then
         echo "Error: --test-command requires a command string" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --test-command 'pnpm test:e2e'" >&2
+        echo "    --test-command 'npx playwright test'" >&2
+        echo "    --test-command 'bun run test:e2e'" >&2
+        echo "" >&2
+        echo "  You provided: --test-command (with no command)" >&2
         exit 1
       fi
       TEST_COMMAND="$2"
@@ -122,27 +142,42 @@ while [[ $# -gt 0 ]]; do
     --completion-promise)
       if [[ -z "${2:-}" ]]; then
         echo "Error: --completion-promise requires a text argument" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --completion-promise 'DONE'" >&2
+        echo "    --completion-promise 'E2E COMPLETE'" >&2
+        echo "    --completion-promise 'All flows tested'" >&2
+        echo "" >&2
+        echo "  You provided: --completion-promise (with no text)" >&2
+        echo "" >&2
+        echo "  Note: Multi-word promises must be quoted!" >&2
         exit 1
       fi
       COMPLETION_PROMISE="$2"
       shift 2
       ;;
     -*)
-      echo "Unknown option: $1" >&2
-      echo "Use --help for usage information" >&2
+      echo "Error: Unknown option: $1" >&2
+      echo "" >&2
+      echo "  Valid options:" >&2
+      echo "    --max-iterations <n>        Safety limit" >&2
+      echo "    --test-command '<cmd>'      E2E test command" >&2
+      echo "    --completion-promise <text> Promise phrase" >&2
+      echo "    -h, --help                  Show help" >&2
+      echo "" >&2
+      echo "  Use --help for full usage information" >&2
       exit 1
       ;;
     *)
-      # Positional argument = custom prompt
-      if [[ -n "$CUSTOM_PROMPT" ]]; then
-        CUSTOM_PROMPT="$CUSTOM_PROMPT $1"
-      else
-        CUSTOM_PROMPT="$1"
-      fi
+      # Positional argument = custom prompt part
+      CUSTOM_PROMPT_PARTS+=("$1")
       shift
       ;;
   esac
 done
+
+# Join all custom prompt parts with spaces
+CUSTOM_PROMPT="${CUSTOM_PROMPT_PARTS[*]:-}"
 
 # Detect package manager early for messages
 PM=$(detect_package_manager)
@@ -180,6 +215,9 @@ if [[ ! -f "$PROGRESS_FILE" ]]; then
   echo "" >> "$PROGRESS_FILE"
 fi
 
+# Quote completion promise for YAML
+COMPLETION_PROMISE_YAML="\"$COMPLETION_PROMISE\""
+
 # Create state file
 STATE_FILE=".claude/e2e-loop.local.md"
 cat > "$STATE_FILE" <<EOF
@@ -188,7 +226,7 @@ active: true
 iteration: 1
 max_iterations: $MAX_ITERATIONS
 test_command: "$TEST_COMMAND"
-completion_promise: "$COMPLETION_PROMISE"
+completion_promise: $COMPLETION_PROMISE_YAML
 e2e_folder: "$E2E_FOLDER"
 custom_prompt: "$CUSTOM_PROMPT"
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -391,6 +429,24 @@ File naming convention:
 The stop hook is now active. When you try to exit, the same prompt will be
 fed back for the next iteration until E2E coverage is complete.
 
-To complete: output <promise>$COMPLETION_PROMISE</promise>
 To cancel: /cancel-e2e
 EOF
+
+# Display completion promise requirements
+echo ""
+echo "========================================================================"
+echo "CRITICAL - E2E Test Loop Completion Promise"
+echo "========================================================================"
+echo ""
+echo "To complete this loop, output this EXACT text:"
+echo "  <promise>$COMPLETION_PROMISE</promise>"
+echo ""
+echo "STRICT REQUIREMENTS:"
+echo "  - Use <promise> XML tags EXACTLY as shown above"
+echo "  - The statement MUST be completely and unequivocally TRUE"
+echo "  - Do NOT output false statements to exit the loop"
+echo "  - Do NOT lie even if you think you should exit"
+echo ""
+echo "If you believe you're stuck or E2E coverage is unreachable, keep trying."
+echo "The loop continues until the promise is GENUINELY TRUE."
+echo "========================================================================"

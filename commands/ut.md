@@ -1,7 +1,7 @@
 ---
 name: ut
 description: "Start unit test coverage improvement loop"
-argument-hint: "[\"custom prompt\"] [--target N%] [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
+argument-hint: PROMPT [--target N%] [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-ut-loop.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
@@ -14,7 +14,9 @@ Execute the setup script to initialize the unit test loop:
 "${CLAUDE_PLUGIN_ROOT}/scripts/setup-ut-loop.sh" $ARGUMENTS
 ```
 
-You are now in a unit test coverage improvement loop based on Matt Pocock's pattern.
+You are now in a unit test coverage improvement loop.
+
+Please work on the task. When you try to exit, the unit test loop will feed the same PROMPT back to you for the next iteration. You'll see your previous work in files and git history, allowing you to iterate and improve.
 
 ## Your Task
 
@@ -23,9 +25,10 @@ Each iteration, you must:
 1. **Run coverage** to identify files with low coverage
 2. **Find ONE important gap** - focus on user-facing features, not implementation details
 3. **Write ONE meaningful test** that validates real user behavior
-4. **Run coverage again** to verify improvement
-5. **Commit** with message: `test(<file>): <describe behavior>`
-6. **Log progress** to `.claude/ut-progress.txt`
+4. **Run lint, format, and typecheck** the equivalent command in the codebase to ensure code quality
+5. **Run coverage again** to verify improvement
+6. **Commit** with message: `test(<file>): <describe behavior>`
+7. **Log progress** to `.claude/ut-progress.txt`
 
 ## Critical Rules
 
@@ -33,6 +36,8 @@ Each iteration, you must:
 - **User-facing behavior only** - test what users depend on, not implementation details
 - **Quality over quantity** - a great test catches regressions users would notice
 - **No coverage gaming** - if code isn't worth testing, use `/* v8 ignore */` instead
+- **Log progress** - Make sure to log progress to `.claude/e2e-progress.txt` after each successful test run.
+- **Ensure code quality** - Run lint, format, and typecheck before committing
 
 ## Completion
 

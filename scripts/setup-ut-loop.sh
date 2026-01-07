@@ -10,14 +10,14 @@ TARGET_COVERAGE=0
 MAX_ITERATIONS=0
 TEST_COMMAND=""
 COMPLETION_PROMISE="COVERAGE COMPLETE"
-CUSTOM_PROMPT=""
+CUSTOM_PROMPT_PARTS=()
 
 show_help() {
   cat << 'HELP_EOF'
 Unit Test Loop - Iterative unit test coverage improvement (Matt Pocock pattern)
 
 USAGE:
-  /ut [OPTIONS] ["custom prompt"]
+  /ut [OPTIONS] [CUSTOM PROMPT...]
 
 OPTIONS:
   --target <N%>                 Target coverage percentage (exits when reached)
@@ -27,9 +27,9 @@ OPTIONS:
   -h, --help                    Show this help message
 
 CUSTOM PROMPT:
-  Optional positional argument to customize the task. Added to the default instructions.
-  Example: /ut "refactor existing tests to follow AAA pattern"
-  Example: /ut "focus on error handling" --target 80%
+  Optional positional arguments to customize the task. Multi-word works without quotes:
+    /ut focus on error handling paths --target 80%
+    /ut refactor existing tests to follow AAA pattern
 
 DESCRIPTION:
   Starts a unit test coverage improvement loop. Each iteration:
@@ -44,7 +44,7 @@ EXAMPLES:
   /ut --target 80% --max-iterations 20
   /ut --test-command "bun test:coverage"
   /ut --completion-promise "ALL TESTS PASS" --max-iterations 10
-  /ut "rewrite tests to follow AAA pattern"
+  /ut rewrite tests to follow AAA pattern
 
 AUTO-DETECTION:
   Detects coverage tool: vitest > jest > c8 > nyc > package.json script
@@ -126,24 +126,50 @@ while [[ $# -gt 0 ]]; do
       ;;
     --target)
       if [[ -z "${2:-}" ]]; then
-        echo "Error: --target requires a percentage (e.g., --target 80%)" >&2
+        echo "Error: --target requires a percentage argument" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --target 80%" >&2
+        echo "    --target 90" >&2
+        echo "    --target 75.5%" >&2
+        echo "" >&2
+        echo "  You provided: --target (with no percentage)" >&2
         exit 1
       fi
       # Strip % if present
       TARGET_COVERAGE="${2%\%}"
       if ! [[ "$TARGET_COVERAGE" =~ ^[0-9]+\.?[0-9]*$ ]]; then
         echo "Error: --target must be a number, got: $2" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --target 80%" >&2
+        echo "    --target 90" >&2
+        echo "" >&2
+        echo "  Invalid: text, negative numbers" >&2
         exit 1
       fi
       shift 2
       ;;
     --max-iterations)
       if [[ -z "${2:-}" ]]; then
-        echo "Error: --max-iterations requires a number" >&2
+        echo "Error: --max-iterations requires a number argument" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --max-iterations 10" >&2
+        echo "    --max-iterations 50" >&2
+        echo "    --max-iterations 100" >&2
+        echo "" >&2
+        echo "  You provided: --max-iterations (with no number)" >&2
         exit 1
       fi
       if ! [[ "$2" =~ ^[0-9]+$ ]]; then
         echo "Error: --max-iterations must be a positive integer, got: $2" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --max-iterations 10" >&2
+        echo "    --max-iterations 50" >&2
+        echo "" >&2
+        echo "  Invalid: decimals (10.5), negative numbers (-5), text" >&2
         exit 1
       fi
       MAX_ITERATIONS="$2"
@@ -152,6 +178,13 @@ while [[ $# -gt 0 ]]; do
     --test-command)
       if [[ -z "${2:-}" ]]; then
         echo "Error: --test-command requires a command string" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --test-command 'pnpm run coverage'" >&2
+        echo "    --test-command 'bun test:coverage'" >&2
+        echo "    --test-command 'npm run test -- --coverage'" >&2
+        echo "" >&2
+        echo "  You provided: --test-command (with no command)" >&2
         exit 1
       fi
       TEST_COMMAND="$2"
@@ -160,39 +193,56 @@ while [[ $# -gt 0 ]]; do
     --completion-promise)
       if [[ -z "${2:-}" ]]; then
         echo "Error: --completion-promise requires a text argument" >&2
+        echo "" >&2
+        echo "  Valid examples:" >&2
+        echo "    --completion-promise 'DONE'" >&2
+        echo "    --completion-promise 'COVERAGE COMPLETE'" >&2
+        echo "    --completion-promise 'All tests passing'" >&2
+        echo "" >&2
+        echo "  You provided: --completion-promise (with no text)" >&2
+        echo "" >&2
+        echo "  Note: Multi-word promises must be quoted!" >&2
         exit 1
       fi
       COMPLETION_PROMISE="$2"
       shift 2
       ;;
     -*)
-      echo "Unknown option: $1" >&2
-      echo "Use --help for usage information" >&2
+      echo "Error: Unknown option: $1" >&2
+      echo "" >&2
+      echo "  Valid options:" >&2
+      echo "    --target <N%>               Target coverage percentage" >&2
+      echo "    --max-iterations <n>        Safety limit" >&2
+      echo "    --test-command '<cmd>'      Coverage command" >&2
+      echo "    --completion-promise <text> Promise phrase" >&2
+      echo "    -h, --help                  Show help" >&2
+      echo "" >&2
+      echo "  Use --help for full usage information" >&2
       exit 1
       ;;
     *)
-      # Positional argument = custom prompt
-      if [[ -n "$CUSTOM_PROMPT" ]]; then
-        CUSTOM_PROMPT="$CUSTOM_PROMPT $1"
-      else
-        CUSTOM_PROMPT="$1"
-      fi
+      # Positional argument = custom prompt part
+      CUSTOM_PROMPT_PARTS+=("$1")
       shift
       ;;
   esac
 done
 
+# Join all custom prompt parts with spaces
+CUSTOM_PROMPT="${CUSTOM_PROMPT_PARTS[*]:-}"
+
 # Auto-detect test command if not provided
 if [[ -z "$TEST_COMMAND" ]]; then
   TEST_COMMAND=$(detect_coverage_tool)
   if [[ -z "$TEST_COMMAND" ]]; then
-    echo "Error: Could not detect coverage tool." >&2
+    echo "Error: Could not detect coverage tool" >&2
     echo "" >&2
-    echo "No vitest.config.*, jest.config.*, c8, nyc, or coverage script found." >&2
+    echo "  No vitest.config.*, jest.config.*, c8, nyc, or coverage script found." >&2
     echo "" >&2
-    echo "Please specify manually:" >&2
-    echo "  /ut --test-command 'pnpm run coverage'" >&2
-    echo "  /ut --test-command 'bun test:coverage'" >&2
+    echo "  Please specify manually:" >&2
+    echo "    /ut --test-command 'pnpm run coverage'" >&2
+    echo "    /ut --test-command 'bun test:coverage'" >&2
+    echo "    /ut --test-command 'npm run test -- --coverage'" >&2
     exit 1
   fi
 fi
@@ -208,6 +258,9 @@ if [[ ! -f "$PROGRESS_FILE" ]]; then
   echo "" >> "$PROGRESS_FILE"
 fi
 
+# Quote completion promise for YAML
+COMPLETION_PROMISE_YAML="\"$COMPLETION_PROMISE\""
+
 # Create state file
 STATE_FILE=".claude/ut-loop.local.md"
 cat > "$STATE_FILE" <<EOF
@@ -217,7 +270,7 @@ iteration: 1
 max_iterations: $MAX_ITERATIONS
 target_coverage: $TARGET_COVERAGE
 test_command: "$TEST_COMMAND"
-completion_promise: "$COMPLETION_PROMISE"
+completion_promise: $COMPLETION_PROMISE_YAML
 custom_prompt: "$CUSTOM_PROMPT"
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
@@ -316,6 +369,24 @@ $(if [[ -n "$CUSTOM_PROMPT" ]]; then echo "Custom prompt: $CUSTOM_PROMPT"; fi)
 The stop hook is now active. When you try to exit, the same prompt will be
 fed back for the next iteration until the target is reached.
 
-To complete: output <promise>$COMPLETION_PROMISE</promise>
 To cancel: /cancel-ut
 EOF
+
+# Display completion promise requirements
+echo ""
+echo "========================================================================"
+echo "CRITICAL - Unit Test Loop Completion Promise"
+echo "========================================================================"
+echo ""
+echo "To complete this loop, output this EXACT text:"
+echo "  <promise>$COMPLETION_PROMISE</promise>"
+echo ""
+echo "STRICT REQUIREMENTS:"
+echo "  - Use <promise> XML tags EXACTLY as shown above"
+echo "  - The statement MUST be completely and unequivocally TRUE"
+echo "  - Do NOT output false statements to exit the loop"
+echo "  - Do NOT lie even if you think you should exit"
+echo ""
+echo "If you believe you're stuck or coverage target is unreachable, keep trying."
+echo "The loop continues until the promise is GENUINELY TRUE."
+echo "========================================================================"

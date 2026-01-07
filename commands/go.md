@@ -16,7 +16,7 @@ Execute the setup script to initialize the go loop:
 
 You are now in an iterative task loop.
 
-Please work on the task. When you try to exit, the E2E test loop will feed the same PROMPT back to you for the next iteration. You'll see your previous work in files and git history, allowing you to iterate and improve.
+Please work on the task. When you try to exit, the go loop will feed the same PROMPT back to you for the next iteration. You'll see your previous work in files and git history, allowing you to iterate and improve.
 
 ## Modes
 
@@ -49,4 +49,4 @@ When the task is genuinely complete, output:
 <promise>COMPLETION_PROMISE</promise>
 ```
 
-IMPORTANT: Only output this promise when the statement is completely and unequivocally TRUE.
+IMPORTANT: If a completion promise is set, you may ONLY output it when the statement is completely and unequivocally TRUE. Do not output false promises to escape the loop, even if you think you're stuck or should exit for other reasons. The loop is designed to continue until genuine completion.
