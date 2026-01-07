@@ -77,7 +77,12 @@ fi
 # GUARD 3: Validate numeric fields
 # =============================================================================
 if [[ ! "$ITERATION" =~ ^[0-9]+$ ]]; then
-  echo "Loop ($ACTIVE_LOOP): State corrupted (invalid iteration: '$ITERATION')" >&2
+  echo "⚠️  Loop ($ACTIVE_LOOP): State file corrupted" >&2
+  echo "   File: $STATE_FILE" >&2
+  echo "   Problem: 'iteration' field is not a valid number (got: '$ITERATION')" >&2
+  echo "" >&2
+  echo "   This usually means the state file was manually edited or corrupted." >&2
+  echo "   Loop is stopping. Run /$ACTIVE_LOOP again to start fresh." >&2
   rm "$STATE_FILE"
   exit 0
 fi
@@ -98,9 +103,9 @@ fi
 
 if [[ $ITERATION -ge $EFFECTIVE_MAX ]]; then
   if [[ $MAX_ITERATIONS -eq 0 ]]; then
-    echo "Loop ($ACTIVE_LOOP): Fallback safety limit ($FALLBACK_MAX_ITERATIONS) reached."
+    echo "🛑 Loop ($ACTIVE_LOOP): Fallback safety limit ($FALLBACK_MAX_ITERATIONS) reached."
   else
-    echo "Loop ($ACTIVE_LOOP): Max iterations ($MAX_ITERATIONS) reached."
+    echo "🛑 Loop ($ACTIVE_LOOP): Max iterations ($MAX_ITERATIONS) reached."
   fi
   rm "$STATE_FILE"
   exit 0
@@ -112,8 +117,9 @@ fi
 TRANSCRIPT_PATH=$(echo "$HOOK_INPUT" | jq -r '.transcript_path')
 
 if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
-  echo "Loop ($ACTIVE_LOOP): Transcript not found - continuing anyway" >&2
-  # Don't terminate - continue the loop
+  echo "⚠️  Loop ($ACTIVE_LOOP): Transcript not found - continuing anyway" >&2
+  echo "   Expected: $TRANSCRIPT_PATH" >&2
+  # Don't terminate - continue the loop (Claude might have only used tools)
 fi
 
 # Extract last assistant message (if transcript exists)
@@ -121,12 +127,21 @@ LAST_OUTPUT=""
 if [[ -f "$TRANSCRIPT_PATH" ]] && grep -q '"role":"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null; then
   LAST_LINE=$(grep '"role":"assistant"' "$TRANSCRIPT_PATH" | tail -1)
   if [[ -n "$LAST_LINE" ]]; then
-    LAST_OUTPUT=$(echo "$LAST_LINE" | jq -r '
+    # Capture jq output and errors separately
+    JQ_RESULT=$(echo "$LAST_LINE" | jq -r '
       .message.content |
       map(select(.type == "text")) |
       map(.text) |
       join("\n")
-    ' 2>/dev/null || echo "")
+    ' 2>&1)
+    JQ_EXIT=$?
+    if [[ $JQ_EXIT -ne 0 ]]; then
+      echo "⚠️  Loop ($ACTIVE_LOOP): Failed to parse assistant message JSON - continuing anyway" >&2
+      echo "   Error: $JQ_RESULT" >&2
+      # Don't terminate - continue the loop
+    else
+      LAST_OUTPUT="$JQ_RESULT"
+    fi
   fi
 fi
 
@@ -141,8 +156,8 @@ if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]] && [[
   PROMISE_TEXT=$(echo "$LAST_OUTPUT" | perl -0777 -pe 's/.*?<promise>(.*?)<\/promise>.*/$1/s; s/^\s+|\s+$//g; s/\s+/ /g' 2>/dev/null || echo "")
 
   if [[ -n "$PROMISE_TEXT" ]] && [[ "$PROMISE_TEXT" = "$COMPLETION_PROMISE" ]]; then
-    echo "Loop ($ACTIVE_LOOP): Detected <promise>$COMPLETION_PROMISE</promise>"
-    echo "Task complete!"
+    echo "✅ Loop ($ACTIVE_LOOP): Detected <promise>$COMPLETION_PROMISE</promise>"
+    echo "   Task complete!"
     rm "$STATE_FILE"
     exit 0
   fi
@@ -176,7 +191,8 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
         NEXT_STORY_ID=$(jq -r '[.stories[] | select(.passes == false)] | sort_by(.priority) | first | .id // empty' "$PRD_PATH")
 
         if [[ -z "$NEXT_STORY_ID" ]]; then
-          echo "Loop (go/prd): All stories complete! Feature '$FEATURE_NAME' is done."
+          echo "✅ Loop (go/prd): All stories complete!"
+          echo "   Feature '$FEATURE_NAME' is done."
           rm "$STATE_FILE"
           exit 0
         fi
@@ -232,7 +248,7 @@ CRITICAL: Only mark the story as passing when it genuinely passes all verificati
 EOF
 
         PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-        SYSTEM_MSG="Loop (go/prd): Story #$CURRENT_STORY_ID complete! Now on story #$NEXT_STORY_ID of $TOTAL_STORIES"
+        SYSTEM_MSG="✅ Loop (go/prd): Story #$CURRENT_STORY_ID complete! Now on story #$NEXT_STORY_ID of $TOTAL_STORIES"
 
         jq -n \
           --arg prompt "$PROMPT_TEXT" \
@@ -247,7 +263,7 @@ EOF
         mv "$TEMP_FILE" "$STATE_FILE"
 
         PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-        SYSTEM_MSG="Loop (go/prd): Story #$CURRENT_STORY_ID passes but NO COMMIT. Commit: feat($FEATURE_NAME): story #$CURRENT_STORY_ID"
+        SYSTEM_MSG="⚠️  Loop (go/prd): Story #$CURRENT_STORY_ID passes but NO COMMIT found. Commit: feat($FEATURE_NAME): story #$CURRENT_STORY_ID"
 
         jq -n \
           --arg prompt "$PROMPT_TEXT" \
@@ -273,7 +289,15 @@ mv "$TEMP_FILE" "$STATE_FILE"
 PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
 
 if [[ -z "$PROMPT_TEXT" ]]; then
-  echo "Loop ($ACTIVE_LOOP): State corrupted (no prompt found)" >&2
+  echo "⚠️  Loop ($ACTIVE_LOOP): State file corrupted or incomplete" >&2
+  echo "   File: $STATE_FILE" >&2
+  echo "   Problem: No prompt text found after frontmatter" >&2
+  echo "" >&2
+  echo "   This usually means:" >&2
+  echo "     - State file was manually edited" >&2
+  echo "     - File was corrupted during writing" >&2
+  echo "" >&2
+  echo "   Loop is stopping. Run /$ACTIVE_LOOP again to start fresh." >&2
   rm "$STATE_FILE"
   exit 0
 fi
@@ -283,21 +307,21 @@ case "$ACTIVE_LOOP" in
   go)
     if [[ "$MODE" == "prd" ]]; then
       CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
-      SYSTEM_MSG="Loop (go/prd) iteration $NEXT_ITERATION | Story #$CURRENT_STORY_ID not yet passing"
+      SYSTEM_MSG="🔄 Loop (go/prd) iteration $NEXT_ITERATION | Story #$CURRENT_STORY_ID not yet passing"
     else
-      SYSTEM_MSG="Loop (go) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
+      SYSTEM_MSG="🔄 Loop (go) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
     fi
     ;;
   ut)
     TARGET_COVERAGE=$(get_field "$FRONTMATTER" "target_coverage")
     if [[ -n "$TARGET_COVERAGE" ]] && [[ "$TARGET_COVERAGE" != "0" ]]; then
-      SYSTEM_MSG="Loop (ut) iteration $NEXT_ITERATION | Target: ${TARGET_COVERAGE}% | Output <promise>$COMPLETION_PROMISE</promise> when done"
+      SYSTEM_MSG="🔄 Loop (ut) iteration $NEXT_ITERATION | Target: ${TARGET_COVERAGE}% | Output <promise>$COMPLETION_PROMISE</promise> when done"
     else
-      SYSTEM_MSG="Loop (ut) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
+      SYSTEM_MSG="🔄 Loop (ut) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
     fi
     ;;
   e2e)
-    SYSTEM_MSG="Loop (e2e) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when all flows covered"
+    SYSTEM_MSG="🔄 Loop (e2e) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when all flows covered"
     ;;
 esac
 
