@@ -94,59 +94,35 @@ Ask: "If this query takes >500ms, should we show a loading state, optimistically
 
 After Wave 1 answers establish core problem/user context, **PAUSE interviewing** and run research. Store findings in `<research_findings>` for Phase 3.
 
-**Step 1: Codebase Research**
+**IMPORTANT: Spawn all 3 research agents IN PARALLEL using a single message with multiple Task tool calls.**
 
-Use Task tool with subagent_type="Explore":
 ```
-<task_prompt>
-Search codebase for existing implementations related to <feature_topic>.
-Find: existing patterns, similar features, models touched, services involved.
-Return: file paths, code snippets, patterns to follow.
-</task_prompt>
-```
+# In a SINGLE message, spawn all 3:
 
-Also check `plans/` folder for existing specs:
-```bash
-ls plans/
-```
+Task 1: Codebase Research
+- subagent_type: "prd-codebase-researcher"
+- prompt: "Research codebase for <feature_topic>. Find existing patterns, files to modify, models, services, test patterns. Check plans/ folder for existing specs."
 
-**Step 2: Git History Analysis**
+Task 2: Git History Analysis
+- subagent_type: "compound-engineering:research:git-history-analyzer"
+- prompt: "Analyze git history for code related to <feature_topic>. Find: prior attempts, key contributors, why patterns evolved, past decisions/constraints."
 
-Use Task tool with subagent_type="compound-engineering:research:git-history-analyzer":
-```
-<task_prompt>
-Analyze git history for code related to <feature_topic>.
-Find: prior attempts at similar features, key contributors, why existing patterns evolved, decisions/constraints from past changes.
-Return: historical context, contributors to consult, lessons learned, patterns to respect.
-</task_prompt>
+Task 3: External Research
+- subagent_type: "prd-external-researcher"
+- prompt: "Research <feature_topic> using Exa. Find: best practices 2024-2025, code examples, documentation, pitfalls to avoid."
 ```
 
-**Step 3: External Research (Exa)**
+**Conditional research (spawn alongside above if applicable):**
 
-Use Task tool with subagent_type="general-purpose":
-```
-<task_prompt>
-Use Exa MCP tools to research <feature_topic>:
-1. mcp__exa__get_code_context_exa - find code examples for <technology> <feature_type>
-2. mcp__exa__web_search_exa - find best practices 2025
-Return: code snippets, key recommendations, links.
-</task_prompt>
-```
-
-**Step 4: Skill Application (conditional)**
-
-- If UI/frontend mentioned → use Task with subagent_type="general-purpose" to apply frontend-design skill
-- If API/data models mentioned → note architecture patterns for spec
+- If UI/frontend mentioned → also spawn `subagent_type="general-purpose"` to apply frontend-design skill
 - If auth/sensitive data mentioned → flag for Phase 3.5 security review
 
-**Step 5: Store findings**
+**After all agents return**, collect outputs into:
 
-Collect all research outputs into:
 ```
 <research_findings>
   <codebase_patterns>...</codebase_patterns>
   <git_history>...</git_history>
-  <existing_specs>...</existing_specs>
   <exa_recommendations>...</exa_recommendations>
   <skill_insights>...</skill_insights>
 </research_findings>
@@ -236,44 +212,29 @@ Write spec to file:
 
 After writing spec, spawn review agents to catch issues before generating PRD.
 
-**Required Reviewers (spawn all 3 using Task tool in single message):**
+**IMPORTANT: Spawn all 3 reviewers IN PARALLEL using a single message with multiple Task tool calls.**
 
-Use Task tool with subagent_type for each:
-
-Use the spec content written in Phase 3 (store as `<spec_content>` variable).
+Store the spec content from Phase 3 as `<spec_content>` to pass to each reviewer.
 
 ```
-<reviewer_1>
-subagent_type: "compound-engineering:workflow:spec-flow-analyzer"
-<task_prompt>
-<spec_content>{spec written in Phase 3}</spec_content>
-Analyze for user flows, edge cases, missing scenarios.
-Return: missing flows, edge cases not covered, flow gaps.
-</task_prompt>
-</reviewer_1>
+# In a SINGLE message, spawn all 3:
 
-<reviewer_2>
-subagent_type: "compound-engineering:review:architecture-strategist"
-<task_prompt>
-<spec_content>{spec written in Phase 3}</spec_content>
-Review for architectural soundness.
-Return: component boundary issues, dependency concerns, design principle violations.
-</task_prompt>
-</reviewer_2>
+Task 1: Flow Analysis
+- subagent_type: "compound-engineering:workflow:spec-flow-analyzer"
+- prompt: "<spec_content>{spec}</spec_content> Analyze for user flows, edge cases, missing scenarios. Return: missing flows, edge cases not covered, flow gaps."
 
-<reviewer_3>
-subagent_type: "compound-engineering:review:security-sentinel"
-<task_prompt>
-<spec_content>{spec written in Phase 3}</spec_content>
-Scan for security gaps.
-Return: auth issues, data exposure risks, input validation gaps, OWASP concerns.
-</task_prompt>
-</reviewer_3>
+Task 2: Architecture Review
+- subagent_type: "compound-engineering:review:architecture-strategist"
+- prompt: "<spec_content>{spec}</spec_content> Review for architectural soundness. Return: component boundary issues, dependency concerns, design principle violations."
+
+Task 3: Security Review
+- subagent_type: "compound-engineering:review:security-sentinel"
+- prompt: "<spec_content>{spec}</spec_content> Scan for security gaps. Return: auth issues, data exposure risks, input validation gaps, OWASP concerns."
 ```
 
-**Conditional Reviewers:**
-- If UI work detected → also spawn with subagent_type="compound-engineering:design:design-implementation-reviewer"
-- If touching existing code → also spawn with subagent_type="compound-engineering:review:pattern-recognition-specialist"
+**Conditional Reviewers (spawn alongside above if applicable):**
+- If UI work detected → also spawn `subagent_type="compound-engineering:design:design-implementation-reviewer"`
+- If touching existing code → also spawn `subagent_type="compound-engineering:review:pattern-recognition-specialist"`
 
 **Synthesis:**
 
@@ -381,47 +342,22 @@ This file starts empty (just the header). Ralph iterations will append JSON line
 
 ### Phase 5.5: Complexity Estimation
 
-Before generating Ralph command, estimate implementation complexity using **actual research, not just reasoning**.
+Before generating go command, estimate implementation complexity using **actual research, not just reasoning**.
 
-Use Task tool with subagent_type="general-purpose":
+Use the dedicated complexity estimator agent:
 
 ```
-<task_prompt>
-Estimate implementation complexity for this PRD. You MUST use tools to research, not just reason.
+Task: Complexity Estimation
+- subagent_type: "prd-complexity-estimator"
+- prompt: |
+    Estimate implementation complexity for this PRD.
 
-<prd_json>{PRD JSON written in Phase 4}</prd_json>
-<spec_content>{spec written in Phase 3}</spec_content>
+    <prd_json>{PRD JSON written in Phase 4}</prd_json>
+    <spec_content>{spec written in Phase 3}</spec_content>
 
-**Required research steps:**
-
-1. **Codebase analysis** - Use Glob/Grep to find:
-   - Similar existing implementations
-   - Files that will likely need modification
-   - Existing patterns to follow
-
-2. **Dependency check** - For each external dep:
-   - Check if already in package.json
-   - Verify compatibility with project
-
-3. **Test coverage scan** - Use Glob to find:
-   - Existing test patterns
-   - Test file locations
-
-**Then estimate for each story:**
-- Files touched (actual count from research)
-- New vs modify (based on what exists)
-- Integration complexity (based on deps found)
-- Test complexity (based on existing test patterns)
-
-Return:
-<complexity_estimate>
-  <research_summary>What you found in codebase</research_summary>
-  <per_story_scores>story_id: score (1-5) with justification</per_story_scores>
-  <total_iterations>sum of scores × 2</total_iterations>
-  <risk_factors>blocking dependencies, unknowns found</risk_factors>
-  <recommended_max_iterations>total + 20% buffer, minimum 20</recommended_max_iterations>
-</complexity_estimate>
-</task_prompt>
+    Research the codebase to find similar implementations, count files to modify,
+    check dependencies, and analyze test requirements. Return per-story scores
+    and recommended max_iterations.
 ```
 
 Store `<recommended_max_iterations>` value for Phase 6.

@@ -2,8 +2,14 @@
 name: e2e
 description: "Start Playwright E2E test development loop"
 argument-hint: "PROMPT [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
-allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-e2e-loop.sh:*)"]
+allowed-tools:
+  - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-e2e-loop.sh:*)
 hide-from-slash-command-tool: "true"
+hooks:
+  Stop:
+    - type: command
+      command: "${CLAUDE_PLUGIN_ROOT}/hooks/stop_hook.sh"
+      timeout: 30
 ---
 
 # E2E Test Loop

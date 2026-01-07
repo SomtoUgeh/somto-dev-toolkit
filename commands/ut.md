@@ -2,8 +2,14 @@
 name: ut
 description: "Start unit test coverage improvement loop"
 argument-hint: PROMPT [--target N%] [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
-allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-ut-loop.sh:*)"]
+allowed-tools:
+  - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-ut-loop.sh:*)
 hide-from-slash-command-tool: "true"
+hooks:
+  Stop:
+    - type: command
+      command: "${CLAUDE_PLUGIN_ROOT}/hooks/stop_hook.sh"
+      timeout: 30
 ---
 
 # Unit Test Loop
