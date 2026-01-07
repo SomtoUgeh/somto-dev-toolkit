@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Work Loop Setup Script
+# Go Loop Setup Script
 # Dual-mode: Generic (ralph-wiggum style) or PRD-aware
 #
 # Generic mode:
@@ -24,9 +24,9 @@ show_help() {
 Work Loop - Iterative task execution (generic or PRD-aware)
 
 USAGE:
-  /work "<prompt>" --completion-promise "DONE" [OPTIONS]
-  /work --prd <prd.json> [OPTIONS]
-  /work <prd.json> [OPTIONS]
+  /go "<prompt>" --completion-promise "DONE" [OPTIONS]
+  /go --prd <prd.json> [OPTIONS]
+  /go <prd.json> [OPTIONS]
 
 MODES:
   Generic: Provide a prompt and completion promise (ralph-wiggum style)
@@ -40,12 +40,12 @@ OPTIONS:
 
 GENERIC MODE:
   Loops until you output <promise>YOUR_TEXT</promise>
-  Example: /work "Build a CSV parser" --completion-promise "PARSER COMPLETE"
+  Example: /go "Build a CSV parser" --completion-promise "PARSER COMPLETE"
 
 PRD MODE:
   Loops through stories until all have passes=true
   Auto-commits per story, auto-updates progress.txt
-  Example: /work plans/auth/prd.json
+  Example: /go plans/auth/prd.json
 
 STOPPING:
   Generic: output <promise>TEXT</promise>
@@ -137,7 +137,7 @@ if [[ "$MODE" == "generic" ]]; then
   fi
   if [[ -z "$COMPLETION_PROMISE" ]]; then
     echo "Error: --completion-promise required for generic mode" >&2
-    echo "Example: /work \"Your task\" --completion-promise \"DONE\"" >&2
+    echo "Example: /go \"Your task\" --completion-promise \"DONE\"" >&2
     exit 1
   fi
 
@@ -152,7 +152,7 @@ completion_promise: "$COMPLETION_PROMISE"
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 
-# Work Loop
+# go Loop
 
 $PROMPT
 
@@ -251,7 +251,7 @@ max_iterations: $MAX_ITERATIONS
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 
-# Work Loop: $FEATURE_NAME
+# go Loop: $FEATURE_NAME
 
 **Progress:** Story $FIRST_INCOMPLETE of $TOTAL_STORIES ($INCOMPLETE_COUNT remaining)
 **PRD:** \`$PRD_PATH\`
