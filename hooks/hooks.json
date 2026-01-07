@@ -17,23 +17,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/ut_stop_hook.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/e2e_stop_hook.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/go_stop_hook.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_hook.sh",
+            "timeout": 30
           }
         ]
       }
