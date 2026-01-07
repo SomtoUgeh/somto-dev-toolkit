@@ -12,7 +12,7 @@
       "name": "somto-dev-toolkit",
       "source": "./",
       "description": "Personal collection of Claude Code tools and skills",
-      "version": "0.10.13",
+      "version": "0.10.14",
       "author": {
         "name": "Somto Odera"
       },
