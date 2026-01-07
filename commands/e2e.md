@@ -1,6 +1,7 @@
 ---
+name: e2e
 description: "Start Playwright E2E test development loop"
-argument-hint: "[\"custom prompt\"] [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
+argument-hint: "PROMPT [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-e2e-loop.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
@@ -14,6 +15,8 @@ Execute the setup script to initialize the E2E test loop:
 ```
 
 You are now in a Playwright E2E test development loop.
+
+Please work on the task. When you try to exit, the E2E test loop will feed the same PROMPT back to you for the next iteration. You'll see your previous work in files and git history, allowing you to iterate and improve.
 
 ## Your Task
 
@@ -47,4 +50,4 @@ When all critical user flows are covered with E2E tests, output:
 <promise>E2E COMPLETE</promise>
 ```
 
-IMPORTANT: Only output this promise when E2E coverage is genuinely complete.
+IMPORTANT: If a completion promise is set, you may ONLY output it when the statement is completely and unequivocally TRUE. Do not output false promises to escape the loop, even if you think you're stuck or should exit for other reasons. The loop is designed to continue until genuine completion.

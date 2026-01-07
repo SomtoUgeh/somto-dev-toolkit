@@ -16,4 +16,4 @@ To cancel the unit test loop:
 3. **If EXISTS**:
    - Read `.claude/ut-loop.local.md` to get the current iteration from the `iteration:` field
    - Remove the file using Bash: `rm .claude/ut-loop.local.md`
-   - Report: "Cancelled unit test loop (was at iteration N)"
+   - Report: "Cancelled unit test loop (was at iteration N)" where N is the iteration value

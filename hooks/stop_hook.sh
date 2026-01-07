@@ -206,7 +206,7 @@ max_iterations: $MAX_ITERATIONS
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 
-# Work Loop: $FEATURE_NAME
+# go Loop: $FEATURE_NAME
 
 **Progress:** Story $NEXT_STORY_ID of $TOTAL_STORIES ($INCOMPLETE_COUNT remaining)
 **PRD:** \`$PRD_PATH\`

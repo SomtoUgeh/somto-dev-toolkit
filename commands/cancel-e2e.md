@@ -16,4 +16,4 @@ To cancel the E2E test loop:
 3. **If EXISTS**:
    - Read `.claude/e2e-loop.local.md` to get the current iteration from the `iteration:` field
    - Remove the file using Bash: `rm .claude/e2e-loop.local.md`
-   - Report: "Cancelled E2E loop (was at iteration N)"
+   - Report: "Cancelled E2E loop (was at iteration N)" where N is the iteration value

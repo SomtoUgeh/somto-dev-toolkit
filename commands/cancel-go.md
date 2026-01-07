@@ -16,4 +16,4 @@ To cancel the go loop:
 3. **If EXISTS**:
    - Read `.claude/go-loop.local.md` to get the current iteration from the `iteration:` field
    - Remove the file using Bash: `rm .claude/go-loop.local.md`
-   - Report: "Cancelled go loop (was at iteration N)"
+   - Report: "Cancelled go loop (was at iteration N)" where N is the iteration value

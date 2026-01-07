@@ -21,7 +21,7 @@ COMPLETION_PROMISE=""
 
 show_help() {
   cat << 'HELP_EOF'
-Work Loop - Iterative task execution (generic or PRD-aware)
+Go Loop - Iterative task execution (generic or PRD-aware)
 
 USAGE:
   /go "<prompt>" --completion-promise "DONE" [OPTIONS]
