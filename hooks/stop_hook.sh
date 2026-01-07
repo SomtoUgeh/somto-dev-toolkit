@@ -59,7 +59,7 @@ parse_frontmatter() {
 get_field() {
   local frontmatter="$1"
   local field="$2"
-  echo "$frontmatter" | grep "^${field}:" | sed "s/${field}: *//" | tr -d '"'
+  echo "$frontmatter" | grep "^${field}:" | sed "s/${field}: *//" | tr -d '"' || true
 }
 
 FRONTMATTER=$(parse_frontmatter "$STATE_FILE")
