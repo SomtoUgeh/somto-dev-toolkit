@@ -1,30 +1,19 @@
 ---
 name: cancel-go
-description: Cancel active go loop
+description: "Cancel active go loop"
+allowed-tools: ["Bash(test -f .claude/go-loop.local.md:*)", "Bash(rm .claude/go-loop.local.md)", "Read(.claude/go-loop.local.md)"]
+hide-from-slash-command-tool: "true"
 ---
 
 # Cancel Go Loop
 
-Cancel an active go loop (generic or PRD mode).
+To cancel the go loop:
 
-## Instructions
+1. Check if `.claude/go-loop.local.md` exists using Bash: `test -f .claude/go-loop.local.md && echo "EXISTS" || echo "NOT_FOUND"`
 
-Check if a work loop is active:
+2. **If NOT_FOUND**: Say "No active go loop found."
 
-```bash
-if [[ -f ".claude/go-loop.local.md" ]]; then
-  # Extract info from state file
-  FRONTMATTER=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' ".claude/go-loop.local.md")
-  MODE=$(echo "$FRONTMATTER" | grep '^mode:' | sed 's/mode: *//' | tr -d '"')
-  ITERATION=$(echo "$FRONTMATTER" | grep '^iteration:' | sed 's/iteration: *//')
-
-  # Remove state file
-  rm ".claude/go-loop.local.md"
-
-  echo "Go loop cancelled at iteration $ITERATION (mode: $MODE)"
-else
-  echo "No active go loop to cancel"
-fi
-```
-
-The state file is preserved in git history if you need to recover it.
+3. **If EXISTS**:
+   - Read `.claude/go-loop.local.md` to get the current iteration from the `iteration:` field
+   - Remove the file using Bash: `rm .claude/go-loop.local.md`
+   - Report: "Cancelled go loop (was at iteration N)"

@@ -1,4 +1,5 @@
 ---
+name: cancel-e2e
 description: "Cancel active E2E test loop"
 allowed-tools: ["Bash(test -f .claude/e2e-loop.local.md:*)", "Bash(rm .claude/e2e-loop.local.md)", "Read(.claude/e2e-loop.local.md)"]
 hide-from-slash-command-tool: "true"
