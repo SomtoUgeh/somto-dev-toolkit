@@ -5,11 +5,6 @@ argument-hint: "<prompt|prd.json> [--completion-promise TEXT] [--max-iterations 
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-go-loop.sh:*)
 hide-from-slash-command-tool: "true"
-hooks:
-  Stop:
-    - type: command
-      command: "${CLAUDE_PLUGIN_ROOT}/hooks/stop_hook.sh"
-      timeout: 30
 ---
 
 # Go Loop
