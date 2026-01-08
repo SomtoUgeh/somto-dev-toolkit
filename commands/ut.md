@@ -35,6 +35,29 @@ Each iteration, you must:
 
 Treat ALL code as production code. No shortcuts, no "good enough for now". Every line you write will be maintained, extended, and debugged by others. Fight entropy.
 
+## React Testing Library Guidelines
+
+> "The more your tests resemble the way your software is used, the more confidence they can give you."
+
+### Query Priority (use in order)
+1. `getByRole` - **default choice**, use `name` option: `getByRole('button', {name: /submit/i})`
+2. `getByLabelText` - form fields
+3. `getByPlaceholderText` - only if no label
+4. `getByText` - non-interactive elements
+5. `getByTestId` - **last resort only**
+
+### Query Types
+- `getBy`/`getAllBy` - element exists (throws if not found)
+- `queryBy`/`queryAllBy` - **only** for asserting absence
+- `findBy`/`findAllBy` - async elements (returns Promise)
+
+### Best Practices
+- **Use `screen`** - `screen.getByRole('button')` not destructuring render
+- **Use `userEvent.setup()`** - more realistic than `fireEvent`
+- **Use jest-dom matchers** - `toBeDisabled()` not `expect(el.disabled).toBe(true)`
+- **Avoid `act()`** - RTL handles it; use `findBy` or `waitFor` for async
+- **Test behavior, not implementation** - what users see/do, not internal state
+
 ## Critical Rules
 
 - **ONE test per iteration** - focused, reviewable commits
