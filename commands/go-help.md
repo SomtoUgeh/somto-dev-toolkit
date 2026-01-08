@@ -25,6 +25,7 @@ Like ralph-wiggum - loop on any task until completion.
 **Options:**
 - `--completion-promise TEXT` (required): The exact text to output when done
 - `--max-iterations N` (default: 50): Safety limit
+- `--once`: Single iteration, then stop (HITL mode)
 
 ## PRD Mode
 
@@ -47,6 +48,26 @@ For structured development with PRD files from `/prd`.
 - Strict commit verification before advancing
 - Auto-logs to progress.txt
 - Shows story progress in system messages
+
+## HITL Mode (--once)
+
+Single iteration for learning, debugging, or risky tasks.
+
+```bash
+/go plans/auth/prd.json --once
+/go "Fix the bug" --completion-promise "FIXED" --once
+```
+
+**How it works:**
+1. Runs ONE iteration
+2. After completion, stops for your review
+3. Run `/go` again to continue (with or without `--once`)
+
+**Use cases:**
+- Learning how the loop works
+- Testing/debugging prompts before going AFK
+- Risky tasks (auth, payments, migrations) where you want to approve each step
+- Building trust before switching to full loop
 
 ## Commands
 
@@ -75,4 +96,9 @@ Both modes use `.claude/go-loop.local.md` which contains:
 **With custom iteration limit:**
 ```
 /go "Refactor the database layer" --completion-promise "REFACTOR DONE" --max-iterations 100
+```
+
+**HITL mode - one story at a time:**
+```
+/go plans/auth/prd.json --once
 ```

@@ -276,6 +276,19 @@ Parse the User Stories section from the spec and create a PRD JSON file.
 **For each story, generate:**
 - `category`: Infer from story context (functional, ui, integration, edge-case, performance)
 - `steps`: 3-7 explicit verification steps based on spec details and edge cases section
+- `priority`: Assign based on risk and dependency order:
+  1. Architectural decisions - foundations that everything else builds on
+  2. Integration points - where modules connect, reveals incompatibilities early
+  3. Unknown unknowns - risky spikes, fail fast rather than fail late
+  4. Standard features - straightforward implementation
+  5. Polish and cleanup - can be deferred or parallelized
+
+**Story size rules (ENFORCE THESE):**
+- Each story = ONE iteration of /go (aim for ~15-30 min of work)
+- If a story has >7 verification steps, it's too big → break it down
+- If a story touches >3 files, consider splitting by file/layer
+- If a story has "and" in the title, it's probably 2 stories
+- When in doubt, make stories smaller - small steps compound into big progress
 
 **Write to `plans/<feature_name>/prd.json`:**
 
@@ -323,7 +336,7 @@ Parse the User Stories section from the spec and create a PRD JSON file.
 - `category`: `functional`, `ui`, `integration`, `edge-case`, `performance`
 - `steps`: Explicit verification steps (agent knows when done)
 - `passes`: Starts `false`, set `true` when all steps verified
-- `priority`: Processing order (1 = first)
+- `priority`: Processing order (1 = first). Lower = riskier/foundational, higher = safer/polish
 
 ### Phase 5: Create Progress File
 
@@ -370,9 +383,15 @@ Build the go command with the PRD path:
 /go plans/<feature_name>/prd.json --max-iterations <recommended_max_iterations>
 ```
 
-**Copy command to clipboard using Bash:**
+**Copy command to clipboard using Bash (cross-platform):**
 ```bash
-echo '/go plans/<feature_name>/prd.json --max-iterations <recommended_max_iterations>' | pbcopy
+# Detect OS and copy to clipboard
+cmd='/go plans/<feature_name>/prd.json --max-iterations <recommended_max_iterations>'
+case "$(uname -s)" in
+  Darwin) echo "$cmd" | pbcopy ;;
+  Linux) echo "$cmd" | xclip -selection clipboard 2>/dev/null || echo "$cmd" | xsel --clipboard 2>/dev/null ;;
+  MINGW*|MSYS*|CYGWIN*) echo "$cmd" | clip.exe ;;
+esac
 ```
 
 **Then use AskUserQuestion:**
@@ -384,12 +403,18 @@ echo '/go plans/<feature_name>/prd.json --max-iterations <recommended_max_iterat
 Go command copied to clipboard. What next?"
 
 Options:
-- **Run /go now** - Paste and execute immediately
+- **Run /go now** - Full loop, let it run
+- **Run /go --once** - HITL mode, review each story before continuing (recommended for auth, payments, migrations, or first-time PRDs)
 - **Done** - Files ready for later
 
 ---
 
 ## Key Principles
+
+**Production Quality Always**
+- Treat ALL code as production code. No shortcuts, no "good enough for now"
+- Every line will be maintained, extended, and debugged by others
+- Fight entropy
 
 **Be Annoyingly Thorough**
 - Better to ask 20 questions than miss one critical detail
@@ -414,6 +439,8 @@ Options:
 - Tests should live next to the code they test (colocation)
 
 **Small Stories for /go**
-- Each story should be completable in one iteration
-- If a story is too big, break it down
+- Each story = ONE iteration (~15-30 min of work)
+- If >7 steps or >3 files or "and" in title → break it down
 - Clear success criteria = `passes: true`
+- Small steps compound into big progress
+- A story that takes multiple iterations is a failed story

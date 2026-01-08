@@ -36,6 +36,10 @@ Each iteration, you must:
 - `*.e2e.page.ts` - Page objects (locators, setup, actions)
 - `*.e2e.ts` - Test files (concise tests using page objects)
 
+## Quality Expectations
+
+Treat ALL code as production code. No shortcuts, no "good enough for now". Every line you write will be maintained, extended, and debugged by others. Fight entropy.
+
 ## Critical Rules
 
 - **ONE test per iteration** - focused, reviewable commits

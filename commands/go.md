@@ -35,6 +35,20 @@ For PRD-based development. Auto-detects `.json` files or `--prd` flag.
 /go plans/auth/prd.json
 ```
 
+### HITL Mode (--once)
+Single iteration, then stop for review. Use for learning, debugging prompts, or risky tasks.
+
+```
+/go plans/auth/prd.json --once    # One story, then stop
+/go "Fix the bug" --completion-promise "FIXED" --once  # One iteration, then stop
+```
+
+Workflow: Run `--once` repeatedly until you trust the behavior, then switch to full loop.
+
+## Quality Expectations
+
+Treat ALL code as production code. No shortcuts, no "good enough for now". Every line you write will be maintained, extended, and debugged by others. Fight entropy.
+
 ## Your Task
 
 Read the generated state file at `.claude/go-loop.local.md` and begin work.

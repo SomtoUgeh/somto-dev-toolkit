@@ -31,13 +31,17 @@ Each iteration, you must:
 6. **Commit** with message: `test(<file>): <describe behavior>`
 7. **Log progress** to `.claude/ut-progress.txt`
 
+## Quality Expectations
+
+Treat ALL code as production code. No shortcuts, no "good enough for now". Every line you write will be maintained, extended, and debugged by others. Fight entropy.
+
 ## Critical Rules
 
 - **ONE test per iteration** - focused, reviewable commits
 - **User-facing behavior only** - test what users depend on, not implementation details
 - **Quality over quantity** - a great test catches regressions users would notice
 - **No coverage gaming** - if code isn't worth testing, use `/* v8 ignore */` instead
-- **Log progress** - Make sure to log progress to `.claude/e2e-progress.txt` after each successful test run.
+- **Log progress** - Make sure to log progress to `.claude/ut-progress.txt` after each successful test run.
 - **Ensure code quality** - Run lint, format, and typecheck before committing
 
 ## Completion

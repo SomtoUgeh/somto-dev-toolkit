@@ -18,6 +18,7 @@ PROMPT_PARTS=()
 PRD_PATH=""
 MAX_ITERATIONS=50
 COMPLETION_PROMISE=""
+ONCE_MODE=false
 
 show_help() {
   cat << 'HELP_EOF'
@@ -36,6 +37,7 @@ OPTIONS:
   --prd <path>                    PRD file path (forces PRD mode)
   --completion-promise '<text>'   Promise phrase for generic mode (required)
   --max-iterations <n>            Safety limit (default: 50)
+  --once                          Run single iteration (HITL mode), then stop
   -h, --help                      Show this help message
 
 GENERIC MODE:
@@ -119,6 +121,10 @@ while [[ $# -gt 0 ]]; do
       MAX_ITERATIONS="$2"
       shift 2
       ;;
+    --once)
+      ONCE_MODE=true
+      shift
+      ;;
     -*)
       echo "Error: Unknown option: $1" >&2
       echo "" >&2
@@ -126,6 +132,7 @@ while [[ $# -gt 0 ]]; do
       echo "    --prd <path>                  PRD file path" >&2
       echo "    --completion-promise <text>   Promise phrase" >&2
       echo "    --max-iterations <n>          Safety limit" >&2
+      echo "    --once                        Single iteration mode" >&2
       echo "    -h, --help                    Show help" >&2
       echo "" >&2
       echo "  Use --help for full usage information" >&2
@@ -208,6 +215,7 @@ if [[ "$MODE" == "generic" ]]; then
 ---
 mode: "generic"
 active: true
+once: $ONCE_MODE
 iteration: 1
 max_iterations: $MAX_ITERATIONS
 completion_promise: $COMPLETION_PROMISE_YAML
@@ -230,7 +238,18 @@ CRITICAL: Only output this promise when the task is genuinely complete.
 EOF
 
   # Output setup message
-  cat <<EOF
+  if [[ "$ONCE_MODE" == "true" ]]; then
+    cat <<EOF
+Go loop activated (generic mode, ONCE)!
+
+Mode: Single iteration (HITL)
+Completion promise: $COMPLETION_PROMISE
+
+After this iteration completes, you'll stop for review.
+Run /go again to continue, or switch to full loop mode without --once.
+EOF
+  else
+    cat <<EOF
 Go loop activated (generic mode)!
 
 Iteration: 1
@@ -242,6 +261,7 @@ fed back for the next iteration until you output the completion promise.
 
 To cancel: /cancel-go
 EOF
+  fi
 
   # Display prompt
   echo ""
@@ -343,6 +363,7 @@ EOF
 ---
 mode: "prd"
 active: true
+once: $ONCE_MODE
 prd_path: "$PRD_PATH"
 spec_path: "$SPEC_PATH"
 progress_path: "$PROGRESS_PATH"
@@ -365,6 +386,17 @@ started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 \`\`\`json
 $CURRENT_STORY
 \`\`\`
+
+## Task Priority
+
+When multiple stories are available, prioritize in this order:
+1. **Architectural decisions** - foundations cascade through everything built on top
+2. **Integration points** - reveals incompatibilities early, before dependent work
+3. **Unknown unknowns** - fail fast on risky spikes rather than fail late
+4. **Standard features** - straightforward implementation work
+5. **Polish and cleanup** - can be parallelized or deferred
+
+The hook auto-advances by \`priority\` field, but if you notice a dependency or risk the PRD missed, flag it.
 
 ## Code Style
 
@@ -396,7 +428,22 @@ EOF
   echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$FIRST_INCOMPLETE,\"status\":\"STARTED\",\"notes\":\"Beginning story #$FIRST_INCOMPLETE\"}" >> "$PROGRESS_PATH"
 
   # Output setup message
-  cat <<EOF
+  if [[ "$ONCE_MODE" == "true" ]]; then
+    cat <<EOF
+Go loop activated (PRD mode, ONCE)!
+
+Mode: Single iteration (HITL)
+Feature: $FEATURE_NAME
+PRD: $PRD_PATH
+Current story: #$FIRST_INCOMPLETE - $CURRENT_TITLE
+Progress: $INCOMPLETE_COUNT of $TOTAL_STORIES remaining
+
+After this story completes, you'll stop for review.
+Run /go $PRD_PATH --once to continue one story at a time.
+Or run /go $PRD_PATH to switch to full loop mode.
+EOF
+  else
+    cat <<EOF
 Go loop activated (PRD mode)!
 
 Feature: $FEATURE_NAME
@@ -412,4 +459,5 @@ The stop hook is now active. When you complete a story, it will:
 
 To cancel: /cancel-go
 EOF
+  fi
 fi

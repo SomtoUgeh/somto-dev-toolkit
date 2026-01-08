@@ -9,6 +9,24 @@ set -euo pipefail
 # Fallback safety limit - prevents runaway loops even if max_iterations not set
 FALLBACK_MAX_ITERATIONS=100
 
+# Send desktop notification on loop completion (cross-platform, non-blocking)
+notify() {
+  local title="$1"
+  local message="$2"
+  case "$(uname -s)" in
+    Darwin)
+      osascript -e "display notification \"$message\" with title \"$title\"" 2>/dev/null || true
+      ;;
+    Linux)
+      notify-send "$title" "$message" 2>/dev/null || true
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      # Run in background to avoid blocking
+      powershell.exe -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('$message', '$title')" </dev/null >/dev/null 2>&1 &
+      ;;
+  esac
+}
+
 # Read hook input from stdin
 HOOK_INPUT=$(cat)
 
@@ -66,6 +84,7 @@ FRONTMATTER=$(parse_frontmatter "$STATE_FILE")
 ITERATION=$(get_field "$FRONTMATTER" "iteration")
 MAX_ITERATIONS=$(get_field "$FRONTMATTER" "max_iterations")
 COMPLETION_PROMISE=$(get_field "$FRONTMATTER" "completion_promise")
+ONCE_MODE=$(get_field "$FRONTMATTER" "once")
 
 # Handle mode for go loop
 MODE=""
@@ -74,7 +93,18 @@ if [[ "$ACTIVE_LOOP" == "go" ]]; then
 fi
 
 # =============================================================================
-# GUARD 3: Validate numeric fields
+# GUARD 3: Check for --once mode (HITL single iteration)
+# =============================================================================
+if [[ "$ONCE_MODE" == "true" ]]; then
+  echo "✅ Loop ($ACTIVE_LOOP): Single iteration complete (HITL mode)"
+  echo "   Run /go again to continue, or remove --once for full loop."
+  notify "Loop ($ACTIVE_LOOP)" "Iteration complete - ready for review"
+  rm "$STATE_FILE"
+  exit 0
+fi
+
+# =============================================================================
+# GUARD 4: Validate numeric fields
 # =============================================================================
 if [[ ! "$ITERATION" =~ ^[0-9]+$ ]]; then
   echo "⚠️  Loop ($ACTIVE_LOOP): State file corrupted" >&2
@@ -93,7 +123,7 @@ if [[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]]; then
 fi
 
 # =============================================================================
-# GUARD 4: Check iteration limits
+# GUARD 5: Check iteration limits
 # =============================================================================
 # Apply fallback limit if no max_iterations set
 EFFECTIVE_MAX=$MAX_ITERATIONS
@@ -104,8 +134,10 @@ fi
 if [[ $ITERATION -ge $EFFECTIVE_MAX ]]; then
   if [[ $MAX_ITERATIONS -eq 0 ]]; then
     echo "🛑 Loop ($ACTIVE_LOOP): Fallback safety limit ($FALLBACK_MAX_ITERATIONS) reached."
+    notify "Loop ($ACTIVE_LOOP)" "Safety limit reached after $ITERATION iterations"
   else
     echo "🛑 Loop ($ACTIVE_LOOP): Max iterations ($MAX_ITERATIONS) reached."
+    notify "Loop ($ACTIVE_LOOP)" "Max iterations ($MAX_ITERATIONS) reached"
   fi
   rm "$STATE_FILE"
   exit 0
@@ -158,6 +190,7 @@ if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]] && [[
   if [[ -n "$PROMISE_TEXT" ]] && [[ "$PROMISE_TEXT" = "$COMPLETION_PROMISE" ]]; then
     echo "✅ Loop ($ACTIVE_LOOP): Detected <promise>$COMPLETION_PROMISE</promise>"
     echo "   Task complete!"
+    notify "Loop ($ACTIVE_LOOP)" "Task complete! $COMPLETION_PROMISE"
     rm "$STATE_FILE"
     exit 0
   fi
@@ -193,6 +226,7 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
         if [[ -z "$NEXT_STORY_ID" ]]; then
           echo "✅ Loop (go/prd): All stories complete!"
           echo "   Feature '$FEATURE_NAME' is done."
+          notify "Loop (go/prd)" "All stories complete! $FEATURE_NAME done"
           rm "$STATE_FILE"
           exit 0
         fi
@@ -233,6 +267,23 @@ started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 \`\`\`json
 $NEXT_STORY
 \`\`\`
+
+## Task Priority
+
+When multiple stories are available, prioritize in this order:
+1. **Architectural decisions** - foundations cascade through everything built on top
+2. **Integration points** - reveals incompatibilities early, before dependent work
+3. **Unknown unknowns** - fail fast on risky spikes rather than fail late
+4. **Standard features** - straightforward implementation work
+5. **Polish and cleanup** - can be parallelized or deferred
+
+The hook auto-advances by \`priority\` field, but if you notice a dependency or risk the PRD missed, flag it.
+
+## Code Style
+
+- **MINIMAL COMMENTS** - code should be self-documenting
+- Only comment the non-obvious "why", never the "what"
+- Tests should live next to the code they test (colocation)
 
 ## Your Task
 
