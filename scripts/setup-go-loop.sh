@@ -210,6 +210,14 @@ if [[ "$MODE" == "generic" ]]; then
   # Quote completion promise for YAML
   COMPLETION_PROMISE_YAML="\"$COMPLETION_PROMISE\""
 
+  # Create progress file for generic mode
+  PROGRESS_FILE=".claude/go-progress.txt"
+  if [[ ! -f "$PROGRESS_FILE" ]]; then
+    echo "# Go Loop Progress Log" > "$PROGRESS_FILE"
+    echo "# Format: JSONL - one entry per event" >> "$PROGRESS_FILE"
+    echo "" >> "$PROGRESS_FILE"
+  fi
+
   # Create generic mode state file
   cat > "$STATE_FILE" <<EOF
 ---
@@ -219,6 +227,7 @@ once: $ONCE_MODE
 iteration: 1
 max_iterations: $MAX_ITERATIONS
 completion_promise: $COMPLETION_PROMISE_YAML
+progress_path: "$PROGRESS_FILE"
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 
@@ -285,6 +294,9 @@ EOF
   echo "If you believe you're stuck or the task is impossible, keep trying."
   echo "The loop continues until the promise is GENUINELY TRUE."
   echo "========================================================================"
+
+  # Log STARTED to progress file
+  echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"STARTED\",\"mode\":\"generic\",\"notes\":\"Go loop started (generic mode)\"}" >> "$PROGRESS_FILE"
 
 else
   # PRD mode validation
@@ -355,8 +367,26 @@ EOF
   # Get current story details
   CURRENT_STORY=$(jq ".stories[] | select(.id == $FIRST_INCOMPLETE)" "$PRD_PATH")
   CURRENT_TITLE=$(echo "$CURRENT_STORY" | jq -r '.title')
+  CURRENT_SKILL=$(echo "$CURRENT_STORY" | jq -r '.skill // empty')
   TOTAL_STORIES=$STORY_COUNT
   INCOMPLETE_COUNT=$(jq '[.stories[] | select(.passes == false)] | length' "$PRD_PATH")
+
+  # Build skill field for frontmatter (only if skill exists)
+  SKILL_FRONTMATTER=""
+  SKILL_SECTION=""
+  if [[ -n "$CURRENT_SKILL" ]]; then
+    SKILL_FRONTMATTER="skill: \"$CURRENT_SKILL\""
+    SKILL_SECTION="## Required Skill
+
+This story requires the \`$CURRENT_SKILL\` skill. **BEFORE implementing**, invoke:
+
+\`\`\`
+/Skill $CURRENT_SKILL
+\`\`\`
+
+Follow the skill's guidance for implementation approach, patterns, and quality standards.
+"
+  fi
 
   # Create PRD mode state file
   cat > "$STATE_FILE" <<EOF
@@ -370,7 +400,8 @@ progress_path: "$PROGRESS_PATH"
 feature_name: "$FEATURE_NAME"
 current_story_id: $FIRST_INCOMPLETE
 total_stories: $TOTAL_STORIES
-iteration: 1
+${SKILL_FRONTMATTER:+$SKILL_FRONTMATTER
+}iteration: 1
 max_iterations: $MAX_ITERATIONS
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
@@ -404,7 +435,7 @@ The hook auto-advances by \`priority\` field, but if you notice a dependency or 
 - Only comment the non-obvious "why", never the "what"
 - Tests should live next to the code they test (colocation)
 
-## Your Task
+$SKILL_SECTION## Your Task
 
 1. Read the full spec at \`$SPEC_PATH\`
 2. Implement story #$FIRST_INCOMPLETE: "$CURRENT_TITLE"
@@ -424,8 +455,18 @@ When you're done with this story, the hook will automatically:
 CRITICAL: Only mark the story as passing when it genuinely passes all verification steps.
 EOF
 
-  # Log start to progress file
-  echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$FIRST_INCOMPLETE,\"status\":\"STARTED\",\"notes\":\"Beginning story #$FIRST_INCOMPLETE\"}" >> "$PROGRESS_PATH"
+  # Log start to progress file (include skill if present)
+  if [[ -n "$CURRENT_SKILL" ]]; then
+    echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$FIRST_INCOMPLETE,\"status\":\"STARTED\",\"skill\":\"$CURRENT_SKILL\",\"notes\":\"Beginning story #$FIRST_INCOMPLETE (requires $CURRENT_SKILL skill)\"}" >> "$PROGRESS_PATH"
+  else
+    echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$FIRST_INCOMPLETE,\"status\":\"STARTED\",\"notes\":\"Beginning story #$FIRST_INCOMPLETE\"}" >> "$PROGRESS_PATH"
+  fi
+
+  # Build skill line for output
+  SKILL_LINE=""
+  if [[ -n "$CURRENT_SKILL" ]]; then
+    SKILL_LINE="Required skill: $CURRENT_SKILL (invoke /$CURRENT_SKILL before implementing)"
+  fi
 
   # Output setup message
   if [[ "$ONCE_MODE" == "true" ]]; then
@@ -437,7 +478,8 @@ Feature: $FEATURE_NAME
 PRD: $PRD_PATH
 Current story: #$FIRST_INCOMPLETE - $CURRENT_TITLE
 Progress: $INCOMPLETE_COUNT of $TOTAL_STORIES remaining
-
+${SKILL_LINE:+$SKILL_LINE
+}
 After this story completes, you'll stop for review.
 Run /go $PRD_PATH --once to continue one story at a time.
 Or run /go $PRD_PATH to switch to full loop mode.
@@ -451,7 +493,8 @@ PRD: $PRD_PATH
 Current story: #$FIRST_INCOMPLETE - $CURRENT_TITLE
 Progress: $INCOMPLETE_COUNT of $TOTAL_STORIES remaining
 Max iterations: $MAX_ITERATIONS
-
+${SKILL_LINE:+$SKILL_LINE
+}
 The stop hook is now active. When you complete a story, it will:
 - Verify passes=true in prd.json
 - Verify you committed

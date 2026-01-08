@@ -227,6 +227,7 @@ iteration: 1
 max_iterations: $MAX_ITERATIONS
 test_command: "$TEST_COMMAND"
 completion_promise: $COMPLETION_PROMISE_YAML
+progress_path: "$PROGRESS_FILE"
 e2e_folder: "$E2E_FOLDER"
 custom_prompt: "$CUSTOM_PROMPT"
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -372,10 +373,8 @@ projects: [
 4. Run \`$TEST_COMMAND\` to verify the test passes
 5. **Lint & format** - run project's lint/format commands, fix any errors
 6. Commit with message: \`test(e2e): <describe the user flow tested>\`
-7. Append progress to \`.claude/e2e-progress.txt\`:
-   \`\`\`json
-   {"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","iteration":1,"file":"<file>","flow":"<user flow>"}
-   \`\`\`
+
+Progress is automatically logged to \`.claude/e2e-progress.txt\` by the stop hook.
 
 ## Test Best Practices
 
@@ -450,3 +449,6 @@ echo ""
 echo "If you believe you're stuck or E2E coverage is unreachable, keep trying."
 echo "The loop continues until the promise is GENUINELY TRUE."
 echo "========================================================================"
+
+# Log STARTED to progress file
+echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"STARTED\",\"e2e_folder\":\"$E2E_FOLDER\",\"notes\":\"E2E test loop started\"}" >> "$PROGRESS_FILE"

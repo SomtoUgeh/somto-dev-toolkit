@@ -275,6 +275,7 @@ Parse the User Stories section from the spec and create a PRD JSON file.
 
 **For each story, generate:**
 - `category`: Infer from story context (functional, ui, integration, edge-case, performance)
+- `skill`: If category is `ui`, set to `"frontend-design"`. Omit for non-UI stories.
 - `steps`: 3-7 explicit verification steps based on spec details and edge cases section
 - `priority`: Assign based on risk and dependency order:
   1. Architectural decisions - foundations that everything else builds on
@@ -323,6 +324,21 @@ Parse the User Stories section from the spec and create a PRD JSON file.
       ],
       "passes": false,
       "priority": 2
+    },
+    {
+      "id": 3,
+      "title": "Design login page with branded styling",
+      "category": "ui",
+      "skill": "frontend-design",
+      "steps": [
+        "Apply brand colors and typography",
+        "Add logo and visual hierarchy",
+        "Implement responsive layout",
+        "Add micro-interactions and hover states",
+        "Verify visual consistency with design system"
+      ],
+      "passes": false,
+      "priority": 3
     }
   ],
   "created_at": "<iso8601_timestamp>",

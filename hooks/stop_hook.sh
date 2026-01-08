@@ -9,6 +9,27 @@ set -euo pipefail
 # Fallback safety limit - prevents runaway loops even if max_iterations not set
 FALLBACK_MAX_ITERATIONS=100
 
+# Update iteration in state file safely (same directory to avoid cross-filesystem issues)
+update_iteration() {
+  local state_file="$1"
+  local new_iteration="$2"
+  local temp_file="${state_file}.tmp.$$"
+
+  sed "s/^iteration: .*/iteration: $new_iteration/" "$state_file" > "$temp_file"
+  mv "$temp_file" "$state_file"
+}
+
+# Write state file atomically (write to temp, then move)
+# Uses printf to handle multiline content safely
+write_state_file() {
+  local state_file="$1"
+  local content="$2"
+  local temp_file="${state_file}.tmp.$$"
+
+  printf '%s\n' "$content" > "$temp_file"
+  mv "$temp_file" "$state_file"
+}
+
 # Send desktop notification on loop completion (cross-platform, non-blocking)
 notify() {
   local title="$1"
@@ -85,6 +106,7 @@ ITERATION=$(get_field "$FRONTMATTER" "iteration")
 MAX_ITERATIONS=$(get_field "$FRONTMATTER" "max_iterations")
 COMPLETION_PROMISE=$(get_field "$FRONTMATTER" "completion_promise")
 ONCE_MODE=$(get_field "$FRONTMATTER" "once")
+PROGRESS_PATH=$(get_field "$FRONTMATTER" "progress_path")
 
 # Handle mode for go loop
 MODE=""
@@ -92,13 +114,28 @@ if [[ "$ACTIVE_LOOP" == "go" ]]; then
   MODE=$(get_field "$FRONTMATTER" "mode")
 fi
 
+# Helper to log progress (only if progress_path exists)
+log_progress() {
+  local json="$1"
+  if [[ -n "$PROGRESS_PATH" ]] && [[ -f "$PROGRESS_PATH" ]]; then
+    echo "$json" >> "$PROGRESS_PATH"
+  fi
+}
+
 # =============================================================================
 # GUARD 3: Check for --once mode (HITL single iteration)
 # =============================================================================
 if [[ "$ONCE_MODE" == "true" ]]; then
   echo "✅ Loop ($ACTIVE_LOOP): Single iteration complete (HITL mode)"
-  echo "   Run /go again to continue, or remove --once for full loop."
+  echo "   Run /$ACTIVE_LOOP again to continue, or remove --once for full loop."
   notify "Loop ($ACTIVE_LOOP)" "Iteration complete - ready for review"
+  # Log HITL_PAUSE for all loop types
+  if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
+    CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"HITL_PAUSE\",\"notes\":\"Single iteration complete (--once mode)\"}"
+  else
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"HITL_PAUSE\",\"iteration\":$ITERATION,\"notes\":\"Single iteration complete (--once mode)\"}"
+  fi
   rm "$STATE_FILE"
   exit 0
 fi
@@ -138,6 +175,13 @@ if [[ $ITERATION -ge $EFFECTIVE_MAX ]]; then
   else
     echo "🛑 Loop ($ACTIVE_LOOP): Max iterations ($MAX_ITERATIONS) reached."
     notify "Loop ($ACTIVE_LOOP)" "Max iterations ($MAX_ITERATIONS) reached"
+  fi
+  # Log max iterations reached for all loop types
+  if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
+    CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"MAX_ITERATIONS\",\"notes\":\"Loop stopped after $ITERATION iterations\"}"
+  else
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"MAX_ITERATIONS\",\"iteration\":$ITERATION,\"notes\":\"Loop stopped after $ITERATION iterations\"}"
   fi
   rm "$STATE_FILE"
   exit 0
@@ -191,6 +235,13 @@ if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]] && [[
     echo "✅ Loop ($ACTIVE_LOOP): Detected <promise>$COMPLETION_PROMISE</promise>"
     echo "   Task complete!"
     notify "Loop ($ACTIVE_LOOP)" "Task complete! $COMPLETION_PROMISE"
+    # Log COMPLETED for all loop types
+    if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
+      CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"COMPLETED\",\"notes\":\"Promise fulfilled: $COMPLETION_PROMISE\"}"
+    else
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"COMPLETED\",\"iteration\":$ITERATION,\"notes\":\"Promise fulfilled: $COMPLETION_PROMISE\"}"
+    fi
     rm "$STATE_FILE"
     exit 0
   fi
@@ -227,6 +278,9 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
           echo "✅ Loop (go/prd): All stories complete!"
           echo "   Feature '$FEATURE_NAME' is done."
           notify "Loop (go/prd)" "All stories complete! $FEATURE_NAME done"
+          if [[ -f "$PROGRESS_PATH" ]]; then
+            echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"COMPLETED\",\"notes\":\"All $TOTAL_STORIES stories complete for $FEATURE_NAME\"}" >> "$PROGRESS_PATH"
+          fi
           rm "$STATE_FILE"
           exit 0
         fi
@@ -235,27 +289,56 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
         NEXT_ITERATION=$((ITERATION + 1))
         NEXT_STORY=$(jq ".stories[] | select(.id == $NEXT_STORY_ID)" "$PRD_PATH")
         NEXT_TITLE=$(echo "$NEXT_STORY" | jq -r '.title')
+        NEXT_SKILL=$(echo "$NEXT_STORY" | jq -r '.skill // empty')
         INCOMPLETE_COUNT=$(jq '[.stories[] | select(.passes == false)] | length' "$PRD_PATH")
 
-        if [[ -f "$PROGRESS_PATH" ]]; then
-          echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$NEXT_STORY_ID,\"status\":\"STARTED\",\"notes\":\"Beginning story #$NEXT_STORY_ID\"}" >> "$PROGRESS_PATH"
+        # Build skill fields for next story
+        SKILL_FRONTMATTER=""
+        SKILL_SECTION=""
+        if [[ -n "$NEXT_SKILL" ]]; then
+          SKILL_FRONTMATTER="skill: \"$NEXT_SKILL\""
+          SKILL_SECTION="## Required Skill
+
+This story requires the \`$NEXT_SKILL\` skill. **BEFORE implementing**, invoke:
+
+\`\`\`
+/Skill $NEXT_SKILL
+\`\`\`
+
+Follow the skill's guidance for implementation approach, patterns, and quality standards.
+"
         fi
 
-        cat > "$STATE_FILE" <<EOF
----
-mode: "prd"
+        if [[ -f "$PROGRESS_PATH" ]]; then
+          if [[ -n "$NEXT_SKILL" ]]; then
+            echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$NEXT_STORY_ID,\"status\":\"STARTED\",\"skill\":\"$NEXT_SKILL\",\"notes\":\"Beginning story #$NEXT_STORY_ID (requires $NEXT_SKILL skill)\"}" >> "$PROGRESS_PATH"
+          else
+            echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$NEXT_STORY_ID,\"status\":\"STARTED\",\"notes\":\"Beginning story #$NEXT_STORY_ID\"}" >> "$PROGRESS_PATH"
+          fi
+        fi
+
+        # Build frontmatter (skill line only if present)
+        FRONTMATTER_CONTENT="---
+mode: \"prd\"
 active: true
-prd_path: "$PRD_PATH"
-spec_path: "$SPEC_PATH"
-progress_path: "$PROGRESS_PATH"
-feature_name: "$FEATURE_NAME"
+prd_path: \"$PRD_PATH\"
+spec_path: \"$SPEC_PATH\"
+progress_path: \"$PROGRESS_PATH\"
+feature_name: \"$FEATURE_NAME\"
 current_story_id: $NEXT_STORY_ID
-total_stories: $TOTAL_STORIES
+total_stories: $TOTAL_STORIES"
+        if [[ -n "$SKILL_FRONTMATTER" ]]; then
+          FRONTMATTER_CONTENT="$FRONTMATTER_CONTENT
+$SKILL_FRONTMATTER"
+        fi
+        FRONTMATTER_CONTENT="$FRONTMATTER_CONTENT
 iteration: $NEXT_ITERATION
 max_iterations: $MAX_ITERATIONS
-started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
----
+started_at: \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+---"
 
+        # Build content body
+        BODY_CONTENT="
 # go Loop: $FEATURE_NAME
 
 **Progress:** Story $NEXT_STORY_ID of $TOTAL_STORIES ($INCOMPLETE_COUNT remaining)
@@ -282,21 +365,23 @@ The hook auto-advances by \`priority\` field, but if you notice a dependency or 
 ## Code Style
 
 - **MINIMAL COMMENTS** - code should be self-documenting
-- Only comment the non-obvious "why", never the "what"
+- Only comment the non-obvious \"why\", never the \"what\"
 - Tests should live next to the code they test (colocation)
 
-## Your Task
+${SKILL_SECTION}## Your Task
 
 1. Read the full spec at \`$SPEC_PATH\`
-2. Implement story #$NEXT_STORY_ID: "$NEXT_TITLE"
+2. Implement story #$NEXT_STORY_ID: \"$NEXT_TITLE\"
 3. Follow the verification steps listed in the story
 4. Write/update tests next to the code they test
 5. Run: format, lint, tests, types (all must pass)
 6. Update \`$PRD_PATH\`: set \`passes = true\` for story $NEXT_STORY_ID
 7. Commit with appropriate type: \`<type>($FEATURE_NAME): story #$NEXT_STORY_ID - $NEXT_TITLE\`
 
-CRITICAL: Only mark the story as passing when it genuinely passes all verification steps.
-EOF
+CRITICAL: Only mark the story as passing when it genuinely passes all verification steps."
+
+        # Write state file atomically
+        write_state_file "$STATE_FILE" "$FRONTMATTER_CONTENT$BODY_CONTENT"
 
         PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
         SYSTEM_MSG="✅ Loop (go/prd): Story #$CURRENT_STORY_ID complete! Now on story #$NEXT_STORY_ID of $TOTAL_STORIES"
@@ -309,9 +394,7 @@ EOF
       else
         # Story passes but no commit - remind to commit
         NEXT_ITERATION=$((ITERATION + 1))
-        TEMP_FILE="/tmp/go-loop-state.tmp.$$"
-        sed "s/^iteration: .*/iteration: $NEXT_ITERATION/" "$STATE_FILE" > "$TEMP_FILE"
-        mv "$TEMP_FILE" "$STATE_FILE"
+        update_iteration "$STATE_FILE" "$NEXT_ITERATION"
 
         PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
         SYSTEM_MSG="⚠️  Loop (go/prd): Story #$CURRENT_STORY_ID passes but NO COMMIT found. Commit: feat($FEATURE_NAME): story #$CURRENT_STORY_ID"
@@ -331,10 +414,7 @@ fi
 # =============================================================================
 NEXT_ITERATION=$((ITERATION + 1))
 
-# Update iteration in state file (use /tmp to avoid Claude Code watcher race condition)
-TEMP_FILE="/tmp/loop-state.tmp.$$"
-sed "s/^iteration: .*/iteration: $NEXT_ITERATION/" "$STATE_FILE" > "$TEMP_FILE"
-mv "$TEMP_FILE" "$STATE_FILE"
+update_iteration "$STATE_FILE" "$NEXT_ITERATION"
 
 # Extract prompt (everything after the closing ---)
 PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
@@ -353,26 +433,31 @@ if [[ -z "$PROMPT_TEXT" ]]; then
   exit 0
 fi
 
-# Build system message based on loop type
+# Build system message based on loop type and log ITERATION
 case "$ACTIVE_LOOP" in
   go)
     if [[ "$MODE" == "prd" ]]; then
       CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
       SYSTEM_MSG="🔄 Loop (go/prd) iteration $NEXT_ITERATION | Story #$CURRENT_STORY_ID not yet passing"
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"ITERATION\",\"notes\":\"Iteration $NEXT_ITERATION - story not yet passing\"}"
     else
       SYSTEM_MSG="🔄 Loop (go) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION\",\"iteration\":$NEXT_ITERATION,\"notes\":\"Continuing generic loop\"}"
     fi
     ;;
   ut)
     TARGET_COVERAGE=$(get_field "$FRONTMATTER" "target_coverage")
     if [[ -n "$TARGET_COVERAGE" ]] && [[ "$TARGET_COVERAGE" != "0" ]]; then
       SYSTEM_MSG="🔄 Loop (ut) iteration $NEXT_ITERATION | Target: ${TARGET_COVERAGE}% | Output <promise>$COMPLETION_PROMISE</promise> when done"
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION\",\"iteration\":$NEXT_ITERATION,\"target_coverage\":$TARGET_COVERAGE,\"notes\":\"Continuing unit test loop\"}"
     else
       SYSTEM_MSG="🔄 Loop (ut) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION\",\"iteration\":$NEXT_ITERATION,\"notes\":\"Continuing unit test loop\"}"
     fi
     ;;
   e2e)
     SYSTEM_MSG="🔄 Loop (e2e) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when all flows covered"
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION\",\"iteration\":$NEXT_ITERATION,\"notes\":\"Continuing E2E test loop\"}"
     ;;
 esac
 

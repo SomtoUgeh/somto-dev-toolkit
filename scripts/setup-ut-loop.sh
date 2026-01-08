@@ -271,6 +271,7 @@ max_iterations: $MAX_ITERATIONS
 target_coverage: $TARGET_COVERAGE
 test_command: "$TEST_COMMAND"
 completion_promise: $COMPLETION_PROMISE_YAML
+progress_path: "$PROGRESS_FILE"
 custom_prompt: "$CUSTOM_PROMPT"
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
@@ -337,10 +338,8 @@ Invalid uses (write a test instead):
 4. Run \`$TEST_COMMAND\` again - coverage should increase as a side effect of testing real behavior
 5. **Lint & format** - run project's lint/format commands, fix any errors
 6. Commit with message: \`test(<file>): <describe the user behavior being tested>\`
-7. Append progress to \`.claude/ut-progress.txt\`:
-   \`\`\`json
-   {"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","iteration":1,"file":"<file>","notes":"<what you tested>"}
-   \`\`\`
+
+Progress is automatically logged to \`.claude/ut-progress.txt\` by the stop hook.
 
 ## Completion
 
@@ -390,3 +389,10 @@ echo ""
 echo "If you believe you're stuck or coverage target is unreachable, keep trying."
 echo "The loop continues until the promise is GENUINELY TRUE."
 echo "========================================================================"
+
+# Log STARTED to progress file
+if [[ $TARGET_COVERAGE -gt 0 ]]; then
+  echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"STARTED\",\"target_coverage\":$TARGET_COVERAGE,\"notes\":\"Unit test loop started with ${TARGET_COVERAGE}% target\"}" >> "$PROGRESS_FILE"
+else
+  echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"STARTED\",\"notes\":\"Unit test loop started\"}" >> "$PROGRESS_FILE"
+fi
