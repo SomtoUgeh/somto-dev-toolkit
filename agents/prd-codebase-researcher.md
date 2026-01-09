@@ -1,6 +1,8 @@
 ---
 name: prd-codebase-researcher
 description: Research codebase for existing patterns, similar implementations, and relevant files for PRD development. Use when analyzing a codebase to inform feature specifications.
+model: haiku
+color: cyan
 allowed-tools:
   - Glob
   - Grep

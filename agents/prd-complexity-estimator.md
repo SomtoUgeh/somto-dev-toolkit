@@ -1,6 +1,8 @@
 ---
 name: prd-complexity-estimator
 description: Estimate implementation complexity for PRD stories using codebase analysis. Use when determining iteration counts for /go loops.
+model: haiku
+color: orange
 allowed-tools:
   - Glob
   - Grep

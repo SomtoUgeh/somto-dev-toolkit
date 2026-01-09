@@ -1,6 +1,8 @@
 ---
 name: prd-external-researcher
 description: Research external best practices, documentation, and code examples using Exa for PRD development. Use when gathering industry patterns and recommendations.
+model: haiku
+color: green
 allowed-tools:
   - mcp__exa__web_search_exa
   - mcp__exa__get_code_context_exa

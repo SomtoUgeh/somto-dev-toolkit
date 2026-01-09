@@ -1,4 +1,5 @@
 ---
+name: e2e-help
 description: "Explain the E2E test loop technique and Playwright best practices"
 ---
 
