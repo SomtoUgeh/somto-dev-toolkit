@@ -38,6 +38,9 @@ DESTRUCTIVE_PATTERNS = [
     (r"git\s+stash\s+drop", "git stash drop permanently deletes stashed changes"),
     (r"git\s+stash\s+clear", "git stash clear deletes ALL stashed changes"),
 
+    # git rm (deletes files from working tree unless --cached)
+    (r"git\s+rm\s+(?!.*--cached)", "git rm permanently deletes files (use --cached to only unstage)"),
+
     # rm -rf (except common temp/build dirs)
     (r"rm\s+-[a-zA-Z]*r[a-zA-Z]*f|rm\s+-[a-zA-Z]*f[a-zA-Z]*r", "rm -rf permanently deletes files"),
 ]
