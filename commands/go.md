@@ -56,6 +56,10 @@ Read the generated state file at `.claude/go-loop.local.md` and begin work.
 - **Generic mode**: Work on the task and output `<promise>TEXT</promise>` when complete.
 - **PRD mode**: Implement stories one at a time, update prd.json, commit after each.
 
+## Before Each Commit
+
+Run the `pr-review-toolkit:code-simplifier` agent to review and simplify your changes before committing. This ensures each commit is clean and well-structured.
+
 ## Completion
 
 When the task is genuinely complete, output:

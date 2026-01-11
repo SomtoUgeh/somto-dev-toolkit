@@ -28,8 +28,9 @@ Each iteration, you must:
 3. **Write ONE E2E test** (`*.e2e.ts`) that validates the flow
 4. **Run lint, format, and typecheck** the equivalent command in the codebase to ensure code quality
 5. **Run tests** to verify the test passes
-6. **Commit** with message: `test(e2e): <describe the user flow>`
-7. **Log progress** to `.claude/e2e-progress.txt`
+6. **Run code-simplifier** - use the `pr-review-toolkit:code-simplifier` agent to review and simplify your changes
+7. **Commit** with message: `test(e2e): <describe the user flow>`
+8. **Log progress** to `.claude/e2e-progress.txt`
 
 ## File Naming Convention
 

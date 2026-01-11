@@ -28,8 +28,9 @@ Each iteration, you must:
 3. **Write ONE meaningful test** that validates real user behavior
 4. **Run lint, format, and typecheck** the equivalent command in the codebase to ensure code quality
 5. **Run coverage again** to verify improvement
-6. **Commit** with message: `test(<file>): <describe behavior>`
-7. **Log progress** to `.claude/ut-progress.txt`
+6. **Run code-simplifier** - use the `pr-review-toolkit:code-simplifier` agent to review and simplify your changes
+7. **Commit** with message: `test(<file>): <describe behavior>`
+8. **Log progress** to `.claude/ut-progress.txt`
 
 ## Quality Expectations
 
