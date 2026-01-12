@@ -88,7 +88,7 @@ The loop stops when:
 
 ## Files Created
 
-- `.claude/ut-loop.local.md` - State file (iteration, config, prompt)
+- `.claude/ut-loop-<session>.local.md` - State file (iteration, config, prompt)
 - `.claude/ut-progress.txt` - Progress log (JSONL format)
 
 ## React Testing Library Best Practices

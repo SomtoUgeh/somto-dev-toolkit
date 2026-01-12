@@ -28,10 +28,13 @@ Each iteration, you must:
 3. **Write ONE E2E test** (`*.e2e.ts`) that validates the flow
 4. **Run lint, format, and typecheck** the equivalent command in the codebase to ensure code quality
 5. **Run tests** to verify the test passes
-6. **Run code-simplifier** - use the `pr-review-toolkit:code-simplifier` agent to review and simplify your changes
-7. **Run Kieran review** - based on what you changed:
-   - TypeScript code: `compound-engineering:review:kieran-typescript-reviewer`
+6. **[MANDATORY] Run code-simplifier** - ALWAYS use `pr-review-toolkit:code-simplifier` to review changes. Address ALL suggestions.
+7. **[MANDATORY] Run Kieran review** - ALWAYS run based on what you changed:
+   - TypeScript/JavaScript: `compound-engineering:review:kieran-typescript-reviewer`
+   - Python: `compound-engineering:review:kieran-python-reviewer`
+   - Rails/Ruby: `compound-engineering:review:kieran-rails-reviewer`
    - Database/migrations/data models: `compound-engineering:review:data-integrity-guardian`
+   ⚠️ DO NOT skip steps 6-7. Address ALL review findings before step 8.
 8. **Commit** with message: `test(e2e): <describe the user flow>`
 9. **Log progress** to `.claude/e2e-progress.txt`
 

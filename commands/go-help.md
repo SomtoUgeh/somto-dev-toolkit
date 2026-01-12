@@ -77,7 +77,7 @@ Single iteration for learning, debugging, or risky tasks.
 
 ## State File
 
-Both modes use `.claude/go-loop.local.md` which contains:
+Both modes use `.claude/go-loop-<session>.local.md` which contains:
 - YAML frontmatter with mode, iteration, settings
 - Current prompt/task below the frontmatter
 

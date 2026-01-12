@@ -51,18 +51,28 @@ Treat ALL code as production code. No shortcuts, no "good enough for now". Every
 
 ## Your Task
 
-Read the generated state file at `.claude/go-loop.local.md` and begin work.
+Read the generated state file (path shown in setup output) and begin work.
 
 - **Generic mode**: Work on the task and output `<promise>TEXT</promise>` when complete.
 - **PRD mode**: Implement stories one at a time, update prd.json, commit after each.
 
-## Before Each Commit
+## MANDATORY Pre-Commit Reviews
 
-Run the `pr-review-toolkit:code-simplifier` agent to review and simplify your changes before committing. This ensures each commit is clean and well-structured.
+**REQUIRED**: You MUST run these agents before EVERY commit. No exceptions. Do not skip.
 
-Then run Kieran review agents based on what you changed:
-- **TypeScript code**: `compound-engineering:review:kieran-typescript-reviewer`
-- **Database/migrations/data models**: `compound-engineering:review:data-integrity-guardian`
+1. **ALWAYS run code-simplifier first**: `pr-review-toolkit:code-simplifier`
+   - Simplifies and cleans your changes
+   - Address ALL suggestions before proceeding
+
+2. **ALWAYS run the appropriate Kieran reviewer**:
+   - **TypeScript/JavaScript**: `compound-engineering:review:kieran-typescript-reviewer`
+   - **Python**: `compound-engineering:review:kieran-python-reviewer`
+   - **Rails/Ruby**: `compound-engineering:review:kieran-rails-reviewer`
+   - **Database/migrations/data models**: `compound-engineering:review:data-integrity-guardian`
+
+3. **Address ALL review findings** before committing
+
+⚠️ DO NOT commit until both reviews pass. This is non-negotiable.
 
 ## Completion
 

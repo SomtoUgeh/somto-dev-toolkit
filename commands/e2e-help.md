@@ -135,6 +135,11 @@ projects: [
 - **Web-first assertions** - `expect(locator).toBeVisible()` auto-waits
 - **Mock external APIs** - use `page.route()` for third-party services
 
+## Files Created
+
+- `.claude/e2e-loop-<session>.local.md` - State file (iteration, config, prompt)
+- `.claude/e2e-progress.txt` - Progress log (JSONL format)
+
 ## Stopping the Loop
 
 The loop stops when:
