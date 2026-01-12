@@ -1,7 +1,7 @@
 ---
 name: cancel-go
 description: "Cancel active go loop"
-allowed-tools: ["Bash(test -f .claude/go-loop.local.md:*)", "Bash(rm .claude/go-loop.local.md)", "Read(.claude/go-loop.local.md)", "Bash(echo *>>*)"]
+allowed-tools: ["Bash(cat .claude/.current_session:*)", "Bash(test -f .claude/go-loop-*.local.md:*)", "Bash(rm .claude/go-loop-*.local.md)", "Read(.claude/go-loop-*.local.md)", "Bash(echo *>>*)"]
 hide-from-slash-command-tool: "true"
 ---
 
@@ -9,12 +9,14 @@ hide-from-slash-command-tool: "true"
 
 To cancel the go loop:
 
-1. Check if `.claude/go-loop.local.md` exists using Bash: `test -f .claude/go-loop.local.md && echo "EXISTS" || echo "NOT_FOUND"`
+1. Get the current session ID using Bash: `cat .claude/.current_session 2>/dev/null || echo "default"`
 
-2. **If NOT_FOUND**: Say "No active go loop found."
+2. Check if `.claude/go-loop-{SESSION_ID}.local.md` exists using Bash: `test -f .claude/go-loop-{SESSION_ID}.local.md && echo "EXISTS" || echo "NOT_FOUND"`
 
-3. **If EXISTS**:
-   - Read `.claude/go-loop.local.md` to get: `iteration`, `mode`, `progress_path`, and (if PRD) `current_story_id`
+3. **If NOT_FOUND**: Say "No active go loop found for this session."
+
+4. **If EXISTS**:
+   - Read `.claude/go-loop-{SESSION_ID}.local.md` to get: `iteration`, `mode`, `progress_path`, and (if PRD) `current_story_id`
    - Log CANCELLED to progress file:
      - **If PRD mode**:
        ```bash
@@ -24,5 +26,5 @@ To cancel the go loop:
        ```bash
        echo '{"ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","status":"CANCELLED","iteration":N,"notes":"User cancelled go loop"}' >> PROGRESS_PATH
        ```
-   - Remove the file using Bash: `rm .claude/go-loop.local.md`
+   - Remove the file using Bash: `rm .claude/go-loop-{SESSION_ID}.local.md`
    - Report: "Cancelled go loop (was at iteration N)" where N is the iteration value

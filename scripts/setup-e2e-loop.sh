@@ -207,6 +207,9 @@ E2E_FOLDER=$(detect_e2e_folder)
 # Create .claude directory if needed
 mkdir -p .claude
 
+# Read session_id from SessionStart hook (with fallback for edge cases)
+SESSION_ID=$(cat .claude/.current_session 2>/dev/null || echo "default")
+
 # Create progress file if it doesn't exist
 PROGRESS_FILE=".claude/e2e-progress.txt"
 if [[ ! -f "$PROGRESS_FILE" ]]; then
@@ -218,8 +221,8 @@ fi
 # Quote completion promise for YAML
 COMPLETION_PROMISE_YAML="\"$COMPLETION_PROMISE\""
 
-# Create state file
-STATE_FILE=".claude/e2e-loop.local.md"
+# Create state file (session-scoped to prevent cross-instance interference)
+STATE_FILE=".claude/e2e-loop-${SESSION_ID}.local.md"
 cat > "$STATE_FILE" <<EOF
 ---
 active: true

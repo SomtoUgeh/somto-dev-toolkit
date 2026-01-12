@@ -29,8 +29,11 @@ Each iteration, you must:
 4. **Run lint, format, and typecheck** the equivalent command in the codebase to ensure code quality
 5. **Run tests** to verify the test passes
 6. **Run code-simplifier** - use the `pr-review-toolkit:code-simplifier` agent to review and simplify your changes
-7. **Commit** with message: `test(e2e): <describe the user flow>`
-8. **Log progress** to `.claude/e2e-progress.txt`
+7. **Run Kieran review** - based on what you changed:
+   - TypeScript code: `compound-engineering:review:kieran-typescript-reviewer`
+   - Database/migrations/data models: `compound-engineering:review:data-integrity-guardian`
+8. **Commit** with message: `test(e2e): <describe the user flow>`
+9. **Log progress** to `.claude/e2e-progress.txt`
 
 ## File Naming Convention
 

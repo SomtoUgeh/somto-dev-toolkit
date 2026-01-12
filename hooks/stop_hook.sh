@@ -64,9 +64,12 @@ fi
 # =============================================================================
 # GUARD 2: Check which loop is active (if any)
 # =============================================================================
-GO_STATE=".claude/go-loop.local.md"
-UT_STATE=".claude/ut-loop.local.md"
-E2E_STATE=".claude/e2e-loop.local.md"
+# Extract session_id to scope state files per-session (prevents cross-instance interference)
+SESSION_ID=$(echo "$HOOK_INPUT" | jq -r '.session_id // "default"')
+
+GO_STATE=".claude/go-loop-${SESSION_ID}.local.md"
+UT_STATE=".claude/ut-loop-${SESSION_ID}.local.md"
+E2E_STATE=".claude/e2e-loop-${SESSION_ID}.local.md"
 
 ACTIVE_LOOP=""
 STATE_FILE=""

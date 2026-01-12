@@ -60,6 +60,10 @@ Read the generated state file at `.claude/go-loop.local.md` and begin work.
 
 Run the `pr-review-toolkit:code-simplifier` agent to review and simplify your changes before committing. This ensures each commit is clean and well-structured.
 
+Then run Kieran review agents based on what you changed:
+- **TypeScript code**: `compound-engineering:review:kieran-typescript-reviewer`
+- **Database/migrations/data models**: `compound-engineering:review:data-integrity-guardian`
+
 ## Completion
 
 When the task is genuinely complete, output:

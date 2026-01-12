@@ -212,12 +212,12 @@ Write spec to file:
 
 After writing spec, spawn review agents to catch issues before generating PRD.
 
-**IMPORTANT: Spawn all 3 reviewers IN PARALLEL using a single message with multiple Task tool calls.**
+**IMPORTANT: Spawn all 4 reviewers IN PARALLEL using a single message with multiple Task tool calls.**
 
 Store the spec content from Phase 3 as `<spec_content>` to pass to each reviewer.
 
 ```
-# In a SINGLE message, spawn all 3:
+# In a SINGLE message, spawn all 4:
 
 Task 1: Flow Analysis
 - subagent_type: "compound-engineering:workflow:spec-flow-analyzer"
@@ -230,6 +230,10 @@ Task 2: Architecture Review
 Task 3: Security Review
 - subagent_type: "compound-engineering:review:security-sentinel"
 - prompt: "<spec_content>{spec}</spec_content> Scan for security gaps. Return: auth issues, data exposure risks, input validation gaps, OWASP concerns."
+
+Task 4: Plan Review
+- subagent_type: "compound-engineering:plan_review"
+- prompt: "<spec_content>{spec}</spec_content> Have multiple specialized agents review this plan in parallel. Return: consolidated feedback on completeness, feasibility, and implementation concerns."
 ```
 
 **Conditional Reviewers (spawn alongside above if applicable):**
@@ -244,6 +248,7 @@ Store all review outputs in `<review_feedback>`:
   <flow_issues>...</flow_issues>
   <architecture_issues>...</architecture_issues>
   <security_issues>...</security_issues>
+  <plan_review>...</plan_review>
 </review_feedback>
 ```
 
@@ -262,7 +267,7 @@ Options:
 
 **Re-review clause (max 1 re-review):**
 
-If addressing issues results in major spec changes (new user stories, architectural pivots, or scope changes), re-run the 3 required reviewers **once**. After 1 re-review, proceed to Phase 4 regardless. Minor fixes don't require re-review.
+If addressing issues results in major spec changes (new user stories, architectural pivots, or scope changes), re-run the 4 required reviewers **once**. After 1 re-review, proceed to Phase 4 regardless. Minor fixes don't require re-review.
 
 ### Phase 4: Generate PRD JSON
 

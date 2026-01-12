@@ -178,7 +178,10 @@ fi
 # Create .claude directory if needed
 mkdir -p .claude
 
-STATE_FILE=".claude/go-loop.local.md"
+# Read session_id from SessionStart hook (with fallback for edge cases)
+SESSION_ID=$(cat .claude/.current_session 2>/dev/null || echo "default")
+
+STATE_FILE=".claude/go-loop-${SESSION_ID}.local.md"
 
 if [[ "$MODE" == "generic" ]]; then
   # Generic mode validation
