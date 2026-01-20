@@ -9,6 +9,30 @@ set -euo pipefail
 # Fallback safety limit - prevents runaway loops even if max_iterations not set
 FALLBACK_MAX_ITERATIONS=100
 
+# =============================================================================
+# Cross-platform helper functions (macOS/Linux/Windows Git Bash)
+# =============================================================================
+
+# Portable regex extraction using BASH_REMATCH (no grep -P needed)
+# Usage: extract_regex "string" "pattern_with_capture_group"
+# Returns first capture group or empty string
+extract_regex() {
+  local string="$1"
+  local pattern="$2"
+  if [[ $string =~ $pattern ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
+# Portable sed in-place edit (works on macOS, Linux, Windows Git Bash)
+# Usage: sed_inplace "s/old/new/" "file"
+sed_inplace() {
+  local expr="$1"
+  local file="$2"
+  local temp_file="${file}.tmp.$$"
+  sed "$expr" "$file" > "$temp_file" && mv "$temp_file" "$file"
+}
+
 # Update iteration in state file safely (same directory to avoid cross-filesystem issues)
 update_iteration() {
   local state_file="$1"
@@ -70,6 +94,7 @@ SESSION_ID=$(echo "$HOOK_INPUT" | jq -r '.session_id // "default"')
 GO_STATE=".claude/go-loop-${SESSION_ID}.local.md"
 UT_STATE=".claude/ut-loop-${SESSION_ID}.local.md"
 E2E_STATE=".claude/e2e-loop-${SESSION_ID}.local.md"
+PRD_STATE=".claude/prd-loop-${SESSION_ID}.local.md"
 
 ACTIVE_LOOP=""
 STATE_FILE=""
@@ -83,6 +108,9 @@ elif [[ -f "$UT_STATE" ]]; then
 elif [[ -f "$E2E_STATE" ]]; then
   ACTIVE_LOOP="e2e"
   STATE_FILE="$E2E_STATE"
+elif [[ -f "$PRD_STATE" ]]; then
+  ACTIVE_LOOP="prd"
+  STATE_FILE="$PRD_STATE"
 fi
 
 if [[ -z "$ACTIVE_LOOP" ]]; then
@@ -126,9 +154,9 @@ log_progress() {
 }
 
 # =============================================================================
-# GUARD 3: Check for --once mode (HITL single iteration)
+# GUARD 3: Check for --once mode (HITL single iteration) - skip for prd
 # =============================================================================
-if [[ "$ONCE_MODE" == "true" ]]; then
+if [[ "$ACTIVE_LOOP" != "prd" ]] && [[ "$ONCE_MODE" == "true" ]]; then
   echo "✅ Loop ($ACTIVE_LOOP): Single iteration complete (HITL mode)"
   echo "   Run /$ACTIVE_LOOP again to continue, or remove --once for full loop."
   notify "Loop ($ACTIVE_LOOP)" "Iteration complete - ready for review"
@@ -144,50 +172,54 @@ if [[ "$ONCE_MODE" == "true" ]]; then
 fi
 
 # =============================================================================
-# GUARD 4: Validate numeric fields
+# GUARD 4: Validate numeric fields (skip for prd - uses phases not iterations)
 # =============================================================================
-if [[ ! "$ITERATION" =~ ^[0-9]+$ ]]; then
-  echo "⚠️  Loop ($ACTIVE_LOOP): State file corrupted" >&2
-  echo "   File: $STATE_FILE" >&2
-  echo "   Problem: 'iteration' field is not a valid number (got: '$ITERATION')" >&2
-  echo "" >&2
-  echo "   This usually means the state file was manually edited or corrupted." >&2
-  echo "   Loop is stopping. Run /$ACTIVE_LOOP again to start fresh." >&2
-  rm "$STATE_FILE"
-  exit 0
-fi
-
-# Default max_iterations to 0 if not set or invalid
-if [[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]]; then
-  MAX_ITERATIONS=0
-fi
-
-# =============================================================================
-# GUARD 5: Check iteration limits
-# =============================================================================
-# Apply fallback limit if no max_iterations set
-EFFECTIVE_MAX=$MAX_ITERATIONS
-if [[ $EFFECTIVE_MAX -eq 0 ]]; then
-  EFFECTIVE_MAX=$FALLBACK_MAX_ITERATIONS
-fi
-
-if [[ $ITERATION -ge $EFFECTIVE_MAX ]]; then
-  if [[ $MAX_ITERATIONS -eq 0 ]]; then
-    echo "🛑 Loop ($ACTIVE_LOOP): Fallback safety limit ($FALLBACK_MAX_ITERATIONS) reached."
-    notify "Loop ($ACTIVE_LOOP)" "Safety limit reached after $ITERATION iterations"
-  else
-    echo "🛑 Loop ($ACTIVE_LOOP): Max iterations ($MAX_ITERATIONS) reached."
-    notify "Loop ($ACTIVE_LOOP)" "Max iterations ($MAX_ITERATIONS) reached"
+if [[ "$ACTIVE_LOOP" != "prd" ]]; then
+  if [[ ! "$ITERATION" =~ ^[0-9]+$ ]]; then
+    echo "⚠️  Loop ($ACTIVE_LOOP): State file corrupted" >&2
+    echo "   File: $STATE_FILE" >&2
+    echo "   Problem: 'iteration' field is not a valid number (got: '$ITERATION')" >&2
+    echo "" >&2
+    echo "   This usually means the state file was manually edited or corrupted." >&2
+    echo "   Loop is stopping. Run /$ACTIVE_LOOP again to start fresh." >&2
+    rm "$STATE_FILE"
+    exit 0
   fi
-  # Log max iterations reached for all loop types
-  if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
-    CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
-    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"MAX_ITERATIONS\",\"notes\":\"Loop stopped after $ITERATION iterations\"}"
-  else
-    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"MAX_ITERATIONS\",\"iteration\":$ITERATION,\"notes\":\"Loop stopped after $ITERATION iterations\"}"
+
+  # Default max_iterations to 0 if not set or invalid
+  if [[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]]; then
+    MAX_ITERATIONS=0
   fi
-  rm "$STATE_FILE"
-  exit 0
+fi
+
+# =============================================================================
+# GUARD 5: Check iteration limits (skip for prd - uses phases not iterations)
+# =============================================================================
+if [[ "$ACTIVE_LOOP" != "prd" ]]; then
+  # Apply fallback limit if no max_iterations set
+  EFFECTIVE_MAX=$MAX_ITERATIONS
+  if [[ $EFFECTIVE_MAX -eq 0 ]]; then
+    EFFECTIVE_MAX=$FALLBACK_MAX_ITERATIONS
+  fi
+
+  if [[ $ITERATION -ge $EFFECTIVE_MAX ]]; then
+    if [[ $MAX_ITERATIONS -eq 0 ]]; then
+      echo "🛑 Loop ($ACTIVE_LOOP): Fallback safety limit ($FALLBACK_MAX_ITERATIONS) reached."
+      notify "Loop ($ACTIVE_LOOP)" "Safety limit reached after $ITERATION iterations"
+    else
+      echo "🛑 Loop ($ACTIVE_LOOP): Max iterations ($MAX_ITERATIONS) reached."
+      notify "Loop ($ACTIVE_LOOP)" "Max iterations ($MAX_ITERATIONS) reached"
+    fi
+    # Log max iterations reached for all loop types
+    if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
+      CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"MAX_ITERATIONS\",\"notes\":\"Loop stopped after $ITERATION iterations\"}"
+    else
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"MAX_ITERATIONS\",\"iteration\":$ITERATION,\"notes\":\"Loop stopped after $ITERATION iterations\"}"
+    fi
+    rm "$STATE_FILE"
+    exit 0
+  fi
 fi
 
 # =============================================================================
@@ -226,6 +258,576 @@ fi
 
 # NOTE: We do NOT terminate if LAST_OUTPUT is empty!
 # Claude might have only used tools without text output - that's fine.
+
+# =============================================================================
+# Handle PRD loop (phased workflow - separate from iteration-based loops)
+# =============================================================================
+if [[ "$ACTIVE_LOOP" == "prd" ]]; then
+  CURRENT_PHASE=$(get_field "$FRONTMATTER" "current_phase")
+  FEATURE_NAME=$(get_field "$FRONTMATTER" "feature_name")
+  INPUT_TYPE=$(get_field "$FRONTMATTER" "input_type")
+  INPUT_PATH=$(get_field "$FRONTMATTER" "input_path")
+  INPUT_RAW=$(get_field "$FRONTMATTER" "input_raw")
+  SPEC_PATH=$(get_field "$FRONTMATTER" "spec_path")
+  PRD_PATH=$(get_field "$FRONTMATTER" "prd_path")
+  INTERVIEW_QUESTIONS=$(get_field "$FRONTMATTER" "interview_questions")
+  GATE_STATUS=$(get_field "$FRONTMATTER" "gate_status")
+  REVIEW_COUNT=$(get_field "$FRONTMATTER" "review_count")
+  RETRY_COUNT=$(get_field "$FRONTMATTER" "retry_count")
+
+  # Default numeric fields
+  [[ ! "$INTERVIEW_QUESTIONS" =~ ^[0-9]+$ ]] && INTERVIEW_QUESTIONS=0
+  [[ ! "$REVIEW_COUNT" =~ ^[0-9]+$ ]] && REVIEW_COUNT=0
+  [[ ! "$RETRY_COUNT" =~ ^[0-9]+$ ]] && RETRY_COUNT=0
+
+  # Max retries before asking user for help
+  MAX_RETRIES=3
+
+  # Parse structured output markers from LAST_OUTPUT
+  PHASE_COMPLETE=""
+  PHASE_FEATURE=""
+  MAX_ITER_TAG=""
+  GATE_DECISION=""
+
+  if [[ -n "$LAST_OUTPUT" ]]; then
+    # <phase_complete phase="N" feature_name="NAME"/>
+    PHASE_COMPLETE=$(extract_regex "$LAST_OUTPUT" '<phase_complete phase="([^"]+)"')
+    PHASE_FEATURE=$(extract_regex "$LAST_OUTPUT" '<phase_complete[^>]*feature_name="([^"]+)"')
+
+    # <max_iterations>N</max_iterations>
+    MAX_ITER_TAG=$(extract_regex "$LAST_OUTPUT" '<max_iterations>([0-9]+)</max_iterations>')
+
+    # <gate_decision>PROCEED|BLOCK</gate_decision>
+    GATE_DECISION=$(extract_regex "$LAST_OUTPUT" '<gate_decision>([^<]+)</gate_decision>')
+  fi
+
+  # Helper function to generate phase-specific prompt
+  generate_prd_phase_prompt() {
+    local phase="$1"
+    local prompt=""
+
+    case "$phase" in
+      "2")
+        prompt="# PRD Loop: Phase 2 - Deep Interview
+
+**Feature:** $FEATURE_NAME
+
+## Your Task
+
+Conduct a thorough interview using AskUserQuestion. Interview in waves:
+
+**Wave 1 - Core Understanding** (if not done)
+- What problem does this solve? For whom?
+- What does success look like?
+- What's the MVP vs nice-to-have?
+
+**Wave 2 - Technical Deep Dive**
+- What systems/services does this touch?
+- What data models are involved?
+- What existing code patterns should we follow?
+
+**Wave 3 - UX/UI Details**
+- Walk through the user flow step by step
+- What happens on errors? Edge cases?
+
+**Wave 4 - Edge Cases & Concerns**
+- What could go wrong?
+- Security implications?
+
+**Wave 5 - Tradeoffs & Decisions**
+- What are you willing to compromise on?
+- What's non-negotiable?
+
+**Rules:**
+- Ask ONE focused question at a time
+- Go deep on answers - ask follow-ups
+- Continue until you have enough detail to write implementation code (minimum 8-10 questions)
+
+**After Wave 1 (3-4 questions)**, output:
+\`\`\`
+<phase_complete phase=\"2\" next=\"2.5\"/>
+\`\`\`
+
+This triggers research phase before continuing interview."
+        ;;
+      "2.5")
+        prompt="# PRD Loop: Phase 2.5 - Research
+
+**Feature:** $FEATURE_NAME
+
+## Your Task
+
+PAUSE interviewing. Spawn research agents IN PARALLEL (single message, multiple Task tool calls):
+
+1. **Codebase Research**
+   - subagent_type: \"prd-codebase-researcher\"
+   - prompt: \"Research codebase for $FEATURE_NAME. Find existing patterns, files to modify, models, services, test patterns.\"
+
+2. **Git History**
+   - subagent_type: \"compound-engineering:research:git-history-analyzer\"
+   - prompt: \"Analyze git history for code related to $FEATURE_NAME. Find prior attempts, key contributors, why patterns evolved.\"
+
+3. **External Research**
+   - subagent_type: \"prd-external-researcher\"
+   - prompt: \"Research $FEATURE_NAME using Exa. Find best practices, code examples, pitfalls to avoid.\"
+
+After all agents return, store findings and output:
+\`\`\`
+<phase_complete phase=\"2.5\" next=\"2\"/>
+\`\`\`
+
+Continue interviewing with research context (Waves 2-5).
+When interview complete (8-10+ questions total), output:
+\`\`\`
+<phase_complete phase=\"2\" next=\"3\"/>
+\`\`\`"
+        ;;
+      "3")
+        prompt="# PRD Loop: Phase 3 - Write Spec
+
+**Feature:** $FEATURE_NAME
+
+## Your Task
+
+Synthesize interview answers and research into a comprehensive spec.
+
+**Spec Structure:**
+\`\`\`markdown
+# $FEATURE_NAME Specification
+
+## Overview
+## Problem Statement
+## Success Criteria
+## User Stories (As a X, I want Y, so that Z)
+## Detailed Requirements
+### Functional Requirements
+### Non-Functional Requirements
+### UI/UX Specifications
+## Technical Design
+### Data Models
+### API Contracts
+### System Interactions
+### Implementation Notes
+## Edge Cases & Error Handling
+## Open Questions
+## Out of Scope
+## Review Findings (populated in Phase 3.5)
+## References
+\`\`\`
+
+**Write to:** \`plans/$FEATURE_NAME/spec.md\`
+
+After writing spec, output:
+\`\`\`
+<phase_complete phase=\"3\" spec_path=\"plans/$FEATURE_NAME/spec.md\"/>
+\`\`\`"
+        ;;
+      "3.5")
+        prompt="# PRD Loop: Phase 3.5 - Spec Review
+
+**Feature:** $FEATURE_NAME
+**Spec:** \`$SPEC_PATH\`
+
+## Your Task
+
+Spawn 4 reviewers IN PARALLEL (single message, multiple Task tool calls).
+Read the spec first, then pass content to each reviewer.
+
+1. **Flow Analysis**
+   - subagent_type: \"compound-engineering:workflow:spec-flow-analyzer\"
+
+2. **Architecture Review**
+   - subagent_type: \"compound-engineering:review:architecture-strategist\"
+
+3. **Security Review**
+   - subagent_type: \"compound-engineering:review:security-sentinel\"
+
+4. **Plan Review**
+   - subagent_type: \"compound-engineering:plan_review\"
+
+**After reviews complete:**
+- Add critical items to spec's \"Review Findings\" section
+- Update User Stories if reviewers found missing flows
+
+**Gate Decision:**
+If critical security/architecture issues found, use AskUserQuestion:
+\"Reviewers found <issues>. Address now or proceed to PRD generation?\"
+
+Output gate decision:
+\`\`\`
+<gate_decision>PROCEED</gate_decision>
+\`\`\`
+or
+\`\`\`
+<gate_decision>BLOCK</gate_decision>
+\`\`\`
+
+If BLOCK, address issues then re-output PROCEED."
+        ;;
+      "4")
+        prompt="# PRD Loop: Phase 4 - Generate PRD JSON
+
+**Feature:** $FEATURE_NAME
+**Spec:** \`$SPEC_PATH\`
+
+## Your Task
+
+Parse User Stories from spec and create PRD JSON.
+
+**Story size rules:**
+- Each story = ONE iteration of /go (~15-30 min work)
+- If >7 verification steps, it's too big - break it down
+- If touches >3 files, consider splitting
+- If \"and\" in title, probably 2 stories
+
+**Atomic story checklist (ALL must be true):**
+- [ ] Single responsibility - does exactly ONE thing
+- [ ] Independently testable - can verify without other stories
+- [ ] No partial state - either fully done or not started
+- [ ] Clean rollback - can revert with single \`git revert\`
+- [ ] Clear done criteria - unambiguous when complete
+
+**Anti-patterns (split if you see these):**
+- \"Set up X and implement Y\" → 2 stories
+- \"Add model, controller, and view\" → 3 stories
+- \"Handle success and error cases\" → 2 stories
+- Steps that depend on earlier steps succeeding → separate stories
+
+**Write to:** \`plans/$FEATURE_NAME/prd.json\`
+
+\`\`\`json
+{
+  \"title\": \"$FEATURE_NAME\",
+  \"stories\": [
+    {
+      \"id\": 1,
+      \"title\": \"Story title\",
+      \"category\": \"functional|ui|integration|edge-case|performance\",
+      \"skill\": \"frontend-design\",  // only for ui category
+      \"steps\": [\"Step 1\", \"Step 2\", ...],
+      \"passes\": false,
+      \"priority\": 1
+    }
+  ],
+  \"created_at\": \"ISO8601\",
+  \"source_spec\": \"$SPEC_PATH\"
+}
+\`\`\`
+
+After writing PRD, output:
+\`\`\`
+<phase_complete phase=\"4\" prd_path=\"plans/$FEATURE_NAME/prd.json\"/>
+\`\`\`"
+        ;;
+      "5")
+        prompt="# PRD Loop: Phase 5 - Create Progress File
+
+**Feature:** $FEATURE_NAME
+**PRD:** \`$PRD_PATH\`
+
+## Your Task
+
+Write progress file to: \`plans/$FEATURE_NAME/progress.txt\`
+
+\`\`\`
+# Progress Log: $FEATURE_NAME
+# Each line: JSON object with ts, story_id, status, notes
+# Status values: STARTED, PASSED, FAILED, BLOCKED
+\`\`\`
+
+After creating progress file, output:
+\`\`\`
+<phase_complete phase=\"5\" progress_path=\"plans/$FEATURE_NAME/progress.txt\"/>
+\`\`\`"
+        ;;
+      "5.5")
+        prompt="# PRD Loop: Phase 5.5 - Complexity Estimation
+
+**Feature:** $FEATURE_NAME
+**PRD:** \`$PRD_PATH\`
+**Spec:** \`$SPEC_PATH\`
+
+## Your Task
+
+Spawn the complexity estimator agent:
+
+- subagent_type: \"prd-complexity-estimator\"
+- prompt: \"Estimate complexity for this PRD. <prd_json>{read PRD}</prd_json> <spec_content>{read spec}</spec_content>\"
+
+The agent will research the codebase and return a recommended max_iterations value.
+
+**REQUIRED:** After the agent returns, output:
+\`\`\`
+<max_iterations>N</max_iterations>
+\`\`\`
+
+Where N is the agent's recommended value."
+        ;;
+      "6")
+        prompt="# PRD Loop: Phase 6 - Generate Go Command
+
+**Feature:** $FEATURE_NAME
+**PRD:** \`$PRD_PATH\`
+**Max iterations:** $MAX_ITERATIONS
+
+## Your Task
+
+1. Copy go command to clipboard:
+\`\`\`bash
+cmd='/go $PRD_PATH --max-iterations $MAX_ITERATIONS'
+case \"\$(uname -s)\" in
+  Darwin) echo \"\$cmd\" | pbcopy ;;
+  Linux) echo \"\$cmd\" | xclip -selection clipboard 2>/dev/null || echo \"\$cmd\" | xsel --clipboard 2>/dev/null ;;
+  MINGW*|MSYS*|CYGWIN*) echo \"\$cmd\" | clip.exe ;;
+esac
+\`\`\`
+
+2. Use AskUserQuestion:
+\"PRD ready! Files created:
+- \`plans/$FEATURE_NAME/spec.md\`
+- \`plans/$FEATURE_NAME/prd.json\`
+- \`plans/$FEATURE_NAME/progress.txt\`
+
+Go command copied to clipboard. What next?\"
+
+Options:
+- **Run /go now** - Full loop
+- **Run /go --once** - HITL mode (recommended for first-time PRDs)
+- **Done** - Files ready for later
+
+After user responds, output:
+\`\`\`
+<phase_complete phase=\"6\"/>
+\`\`\`"
+        ;;
+    esac
+
+    echo "$prompt"
+  }
+
+  # ===========================================================================
+  # Error Recovery: Track retries when no valid marker found
+  # ===========================================================================
+  # Determine which marker is expected for current phase
+  EXPECTED_MARKER=""
+  case "$CURRENT_PHASE" in
+    "5.5") EXPECTED_MARKER="<max_iterations>N</max_iterations>" ;;
+    "3.5") EXPECTED_MARKER="<gate_decision>PROCEED|BLOCK</gate_decision>" ;;
+    *)     EXPECTED_MARKER="<phase_complete phase=\"$CURRENT_PHASE\" .../>" ;;
+  esac
+
+  # Check if we got a valid marker for the current phase
+  VALID_MARKER_FOUND=false
+  case "$CURRENT_PHASE" in
+    "5.5")
+      [[ -n "$MAX_ITER_TAG" ]] && VALID_MARKER_FOUND=true
+      ;;
+    "3.5")
+      [[ -n "$GATE_DECISION" ]] && VALID_MARKER_FOUND=true
+      ;;
+    *)
+      [[ -n "$PHASE_COMPLETE" ]] && VALID_MARKER_FOUND=true
+      ;;
+  esac
+
+  if [[ "$VALID_MARKER_FOUND" == "true" ]]; then
+    # Reset retry count on success
+    if [[ $RETRY_COUNT -gt 0 ]]; then
+      sed_inplace "s/^retry_count: .*/retry_count: 0/" "$STATE_FILE"
+      sed_inplace "s/^last_error: .*/last_error: \"\"/" "$STATE_FILE"
+    fi
+  else
+    # No valid marker found - increment retry count
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    sed_inplace "s/^retry_count: .*/retry_count: $RETRY_COUNT/" "$STATE_FILE"
+
+    # Compact error summary (first 100 chars of output or "no output")
+    if [[ -n "$LAST_OUTPUT" ]]; then
+      ERROR_SUMMARY=$(echo "$LAST_OUTPUT" | head -c 200 | tr '\n' ' ' | sed 's/"/\\"/g')
+    else
+      ERROR_SUMMARY="No text output from Claude (only tool calls)"
+    fi
+    sed_inplace "s/^last_error: .*/last_error: \"$ERROR_SUMMARY\"/" "$STATE_FILE"
+
+    if [[ $RETRY_COUNT -ge $MAX_RETRIES ]]; then
+      # Max retries reached - stop and ask user for help
+      echo "⚠️  Loop (prd): Phase $CURRENT_PHASE failed after $MAX_RETRIES attempts" >&2
+      echo "" >&2
+      echo "   Expected marker: $EXPECTED_MARKER" >&2
+      echo "   Last output: ${ERROR_SUMMARY:0:100}..." >&2
+      echo "" >&2
+      echo "   The loop is pausing for your help." >&2
+      echo "   Options:" >&2
+      echo "     - Check Claude's output and guide it to produce the marker" >&2
+      echo "     - Run /cancel-prd to stop the loop" >&2
+      echo "     - Manually edit the state file to advance phase" >&2
+      notify "Loop (prd)" "Phase $CURRENT_PHASE needs help after $MAX_RETRIES retries"
+
+      # Don't delete state file - let user intervene
+      # Return a prompt asking for the expected output
+      RECOVERY_PROMPT="# PRD Loop: Recovery Needed
+
+**Phase $CURRENT_PHASE failed after $MAX_RETRIES attempts.**
+
+I couldn't find the expected output marker in your response.
+
+**Expected:** \`$EXPECTED_MARKER\`
+
+**What I saw:** ${ERROR_SUMMARY:0:200}
+
+## Please Help
+
+Either:
+1. Output the expected marker now
+2. Tell me what's blocking you so I can help
+
+$(generate_prd_phase_prompt "$CURRENT_PHASE")"
+
+      jq -n \
+        --arg prompt "$RECOVERY_PROMPT" \
+        --arg msg "⚠️  Loop (prd): Phase $CURRENT_PHASE needs help - no valid marker found after $MAX_RETRIES attempts" \
+        '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    else
+      # Retry - continue with same phase prompt + hint
+      SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE retry $RETRY_COUNT/$MAX_RETRIES - expected marker not found"
+      PROMPT_TEXT=$(generate_prd_phase_prompt "$CURRENT_PHASE")
+      PROMPT_TEXT="$PROMPT_TEXT
+
+---
+**Note:** Previous attempt didn't include the expected marker. Please ensure your response ends with:
+\`$EXPECTED_MARKER\`"
+
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
+  fi
+
+  # Update feature name if provided in phase completion
+  if [[ -n "$PHASE_FEATURE" ]]; then
+    FEATURE_NAME="$PHASE_FEATURE"
+  fi
+
+
+  # Handle phase transitions
+  NEXT_PHASE=""
+  SYSTEM_MSG=""
+
+  # Phase 5.5: max_iterations tag detected
+  if [[ -n "$MAX_ITER_TAG" ]] && [[ "$CURRENT_PHASE" == "5.5" ]]; then
+    NEXT_PHASE="6"
+    # Update max_iterations in state (for phase 6 prompt generation)
+    sed_inplace "s/^max_iterations: .*/max_iterations: $MAX_ITER_TAG/" "$STATE_FILE"
+    MAX_ITERATIONS="$MAX_ITER_TAG"
+    SYSTEM_MSG="✅ Loop (prd): Phase 5.5 complete! max_iterations=$MAX_ITER_TAG. Advancing to phase 6."
+  fi
+
+  # Phase 3.5: gate decision detected
+  if [[ -n "$GATE_DECISION" ]] && [[ "$CURRENT_PHASE" == "3.5" ]]; then
+    if [[ "$GATE_DECISION" == "PROCEED" ]]; then
+      NEXT_PHASE="4"
+      sed_inplace "s/^gate_status: .*/gate_status: proceed/" "$STATE_FILE"
+      SYSTEM_MSG="✅ Loop (prd): Review gate passed! Advancing to phase 4."
+    elif [[ "$GATE_DECISION" == "BLOCK" ]]; then
+      # Stay on phase 3.5, user needs to address issues
+      REVIEW_COUNT=$((REVIEW_COUNT + 1))
+      sed_inplace "s/^review_count: .*/review_count: $REVIEW_COUNT/" "$STATE_FILE"
+      sed_inplace "s/^gate_status: .*/gate_status: blocked/" "$STATE_FILE"
+      SYSTEM_MSG="⚠️  Loop (prd): Review gate blocked. Address issues then output <gate_decision>PROCEED</gate_decision>"
+      # Continue without advancing
+      PROMPT_TEXT=$(generate_prd_phase_prompt "3.5")
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
+  fi
+
+  # Generic phase completion
+  if [[ -n "$PHASE_COMPLETE" ]]; then
+    # Extract next phase from marker if present
+    MARKER_NEXT=$(extract_regex "$LAST_OUTPUT" '<phase_complete[^>]*next="([^"]+)"')
+
+    # Determine next phase based on current phase
+    case "$CURRENT_PHASE" in
+      "1") NEXT_PHASE="${MARKER_NEXT:-2}" ;;
+      "2")
+        if [[ "$MARKER_NEXT" == "2.5" ]]; then
+          NEXT_PHASE="2.5"
+        elif [[ "$MARKER_NEXT" == "3" ]]; then
+          NEXT_PHASE="3"
+        else
+          NEXT_PHASE="2.5"  # Default to research after wave 1
+        fi
+        ;;
+      "2.5") NEXT_PHASE="${MARKER_NEXT:-2}" ;;  # Back to interview
+      "3")
+        NEXT_PHASE="3.5"
+        # Extract spec_path from marker
+        MARKER_SPEC=$(extract_regex "$LAST_OUTPUT" '<phase_complete[^>]*spec_path="([^"]+)"')
+        if [[ -n "$MARKER_SPEC" ]]; then
+          SPEC_PATH="$MARKER_SPEC"
+          sed_inplace "s|^spec_path: .*|spec_path: \"$SPEC_PATH\"|" "$STATE_FILE"
+        fi
+        ;;
+      "3.5") NEXT_PHASE="4" ;;  # Only reached if gate_decision not detected
+      "4")
+        NEXT_PHASE="5"
+        # Extract prd_path from marker
+        MARKER_PRD=$(extract_regex "$LAST_OUTPUT" '<phase_complete[^>]*prd_path="([^"]+)"')
+        if [[ -n "$MARKER_PRD" ]]; then
+          PRD_PATH="$MARKER_PRD"
+          sed_inplace "s|^prd_path: .*|prd_path: \"$PRD_PATH\"|" "$STATE_FILE"
+        fi
+        ;;
+      "5")
+        NEXT_PHASE="5.5"
+        # Extract progress_path from marker
+        MARKER_PROGRESS=$(extract_regex "$LAST_OUTPUT" '<phase_complete[^>]*progress_path="([^"]+)"')
+        if [[ -n "$MARKER_PROGRESS" ]]; then
+          sed_inplace "s|^progress_path: .*|progress_path: \"$MARKER_PROGRESS\"|" "$STATE_FILE"
+        fi
+        ;;
+      "5.5") NEXT_PHASE="6" ;;
+      "6")
+        # PRD complete!
+        echo "✅ Loop (prd): All phases complete! PRD ready."
+        notify "Loop (prd)" "PRD complete for $FEATURE_NAME!"
+        rm "$STATE_FILE"
+        exit 0
+        ;;
+    esac
+    SYSTEM_MSG="✅ Loop (prd): Phase $CURRENT_PHASE complete! Advancing to phase $NEXT_PHASE."
+  fi
+
+  # If no phase transition detected, continue current phase
+  if [[ -z "$NEXT_PHASE" ]]; then
+    SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE continuing..."
+    PROMPT_TEXT=$(generate_prd_phase_prompt "$CURRENT_PHASE")
+    jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+    exit 0
+  fi
+
+  # Update state file with new phase
+  sed_inplace "s/^current_phase: .*/current_phase: \"$NEXT_PHASE\"/" "$STATE_FILE"
+
+  # Update feature_name if changed
+  sed_inplace "s/^feature_name: .*/feature_name: \"$FEATURE_NAME\"/" "$STATE_FILE"
+
+  # Generate new phase prompt
+  PROMPT_TEXT=$(generate_prd_phase_prompt "$NEXT_PHASE")
+
+  # Update state file body with new prompt
+  # Remove old body (everything after second ---) and append new
+  # Note: Using sed '$d' instead of 'head -n -1' for BSD/macOS compatibility
+  FRONTMATTER_CONTENT=$(sed -n '1,/^---$/p' "$STATE_FILE" | sed '$d')
+  FRONTMATTER_END=$(grep -n '^---$' "$STATE_FILE" | head -2 | tail -1 | cut -d: -f1)
+  HEAD_CONTENT=$(head -n "$FRONTMATTER_END" "$STATE_FILE")
+  write_state_file "$STATE_FILE" "$HEAD_CONTENT
+
+$PROMPT_TEXT"
+
+  jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+  exit 0
+fi
 
 # =============================================================================
 # Check for completion promise

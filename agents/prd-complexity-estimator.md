@@ -81,3 +81,15 @@ Given a PRD JSON and spec, estimate:
 ```
 
 Be conservative - underestimating leads to stuck loops.
+
+## REQUIRED Output Tag
+
+**CRITICAL:** You MUST end your response with this exact format:
+
+```
+<max_iterations>N</max_iterations>
+```
+
+Where N is your recommended max_iterations value (the Y + Z from Totals above).
+
+This tag is parsed by the stop hook to advance the PRD loop. Without it, the loop cannot continue.
