@@ -72,6 +72,69 @@ notify() {
   esac
 }
 
+# Show go loop completion summary
+# Usage: show_go_summary "$STATE_FILE" "$ITERATION"
+show_go_summary() {
+  local state_file="$1"
+  local iteration="$2"
+
+  # Extract started_at from state file
+  local started_at=""
+  if [[ -f "$state_file" ]]; then
+    started_at=$(sed -n 's/^started_at: "\(.*\)"/\1/p' "$state_file" | head -1)
+  fi
+
+  # Calculate duration
+  local duration_str="unknown"
+  if [[ -n "$started_at" ]]; then
+    local start_epoch end_epoch
+    case "$(uname -s)" in
+      Darwin)
+        start_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$started_at" "+%s" 2>/dev/null || echo "")
+        ;;
+      *)
+        start_epoch=$(date -d "$started_at" "+%s" 2>/dev/null || echo "")
+        ;;
+    esac
+    if [[ -n "$start_epoch" ]]; then
+      end_epoch=$(date "+%s")
+      local elapsed=$((end_epoch - start_epoch))
+      local mins=$((elapsed / 60))
+      local secs=$((elapsed % 60))
+      if [[ $mins -gt 0 ]]; then
+        duration_str="${mins}m ${secs}s"
+      else
+        duration_str="${secs}s"
+      fi
+    fi
+  fi
+
+  # Get git stats (files changed, insertions, deletions)
+  local git_stats=""
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    local base_branch="main"
+    git rev-parse --verify "$base_branch" >/dev/null 2>&1 || base_branch="master"
+    git_stats=$(git diff "$base_branch" --stat 2>/dev/null | tail -1 || echo "")
+  fi
+
+  # Get commit count since loop started
+  local commit_count=0
+  if [[ -n "$started_at" ]] && git rev-parse --git-dir >/dev/null 2>&1; then
+    commit_count=$(git log --since="$started_at" --oneline 2>/dev/null | wc -l | tr -d ' ')
+  fi
+
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "📊 Loop Summary"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   Iterations: $iteration"
+  echo "   Duration:   $duration_str"
+  [[ "$commit_count" -gt 0 ]] && echo "   Commits:    $commit_count"
+  [[ -n "$git_stats" ]] && echo "   Changes:    $git_stats"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+}
+
 # Read hook input from stdin
 HOOK_INPUT=$(cat)
 
@@ -847,6 +910,7 @@ if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]] && [[
     else
       log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"COMPLETED\",\"iteration\":$ITERATION,\"notes\":\"Promise fulfilled: $COMPLETION_PROMISE\"}"
     fi
+    [[ "$ACTIVE_LOOP" == "go" ]] && show_go_summary "$STATE_FILE" "$ITERATION"
     rm "$STATE_FILE"
     exit 0
   fi
@@ -886,6 +950,7 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
           if [[ -f "$PROGRESS_PATH" ]]; then
             echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"COMPLETED\",\"notes\":\"All $TOTAL_STORIES stories complete for $FEATURE_NAME\"}" >> "$PROGRESS_PATH"
           fi
+          show_go_summary "$STATE_FILE" "$ITERATION"
           rm "$STATE_FILE"
           exit 0
         fi

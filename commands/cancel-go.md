@@ -16,7 +16,7 @@ To cancel the go loop:
 3. **If NOT_FOUND**: Say "No active go loop found for this session."
 
 4. **If EXISTS**:
-   - Read `.claude/go-loop-{SESSION_ID}.local.md` to get: `iteration`, `mode`, `progress_path`, and (if PRD) `current_story_id`
+   - Read `.claude/go-loop-{SESSION_ID}.local.md` to get: `iteration`, `mode`, `progress_path`, `started_at`, and (if PRD) `current_story_id`
    - Log CANCELLED to progress file:
      - **If PRD mode**:
        ```bash
@@ -27,4 +27,12 @@ To cancel the go loop:
        echo '{"ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","status":"CANCELLED","iteration":N,"notes":"User cancelled go loop"}' >> PROGRESS_PATH
        ```
    - Remove the file using Bash: `rm .claude/go-loop-{SESSION_ID}.local.md`
-   - Report: "Cancelled go loop (was at iteration N)" where N is the iteration value
+   - Show summary and report cancellation:
+     ```
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     📊 Loop Summary (Cancelled)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        Iterations: N
+        Duration:   Xm Ys (calculate from started_at to now)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     ```
