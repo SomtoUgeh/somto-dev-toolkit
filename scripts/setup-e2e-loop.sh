@@ -376,8 +376,22 @@ projects: [
 4. Run \`$TEST_COMMAND\` to verify the test passes
 5. **Lint & format** - run project's lint/format commands, fix any errors
 6. Commit with message: \`test(e2e): <describe the user flow tested>\`
+7. **Signal iteration complete** with structured output (see below)
 
-Progress is automatically logged to \`.claude/e2e-progress.txt\` by the stop hook.
+## Iteration Complete Signal
+
+After committing, output this marker so the hook can verify and advance:
+
+\`\`\`
+<iteration_complete test_file="path/to/flow.e2e.ts"/>
+\`\`\`
+
+The hook will:
+- Verify your commit exists
+- Log progress
+- Advance to next iteration
+
+**If you don't output this marker, the iteration won't advance.**
 
 ## Test Best Practices
 

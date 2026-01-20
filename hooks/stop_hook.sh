@@ -72,9 +72,9 @@ notify() {
   esac
 }
 
-# Show go loop completion summary
-# Usage: show_go_summary "$STATE_FILE" "$ITERATION"
-show_go_summary() {
+# Show loop completion summary (works for go, ut, e2e)
+# Usage: show_loop_summary "$STATE_FILE" "$ITERATION"
+show_loop_summary() {
   local state_file="$1"
   local iteration="$2"
 
@@ -910,7 +910,7 @@ if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]] && [[
     else
       log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"COMPLETED\",\"iteration\":$ITERATION,\"notes\":\"Promise fulfilled: $COMPLETION_PROMISE\"}"
     fi
-    [[ "$ACTIVE_LOOP" == "go" ]] && show_go_summary "$STATE_FILE" "$ITERATION"
+    [[ "$ACTIVE_LOOP" =~ ^(go|ut|e2e)$ ]] && show_loop_summary "$STATE_FILE" "$ITERATION"
     rm "$STATE_FILE"
     exit 0
   fi
@@ -950,7 +950,7 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
           if [[ -f "$PROGRESS_PATH" ]]; then
             echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"COMPLETED\",\"notes\":\"All $TOTAL_STORIES stories complete for $FEATURE_NAME\"}" >> "$PROGRESS_PATH"
           fi
-          show_go_summary "$STATE_FILE" "$ITERATION"
+          show_loop_summary "$STATE_FILE" "$ITERATION"
           rm "$STATE_FILE"
           exit 0
         fi
@@ -1076,6 +1076,44 @@ CRITICAL: Only mark the story as passing when it genuinely passes all verificati
         exit 0
       fi
     fi
+  fi
+fi
+
+# =============================================================================
+# Verify iteration completion for ut/e2e loops (structured output control flow)
+# =============================================================================
+if [[ "$ACTIVE_LOOP" == "ut" ]] || [[ "$ACTIVE_LOOP" == "e2e" ]]; then
+  # Parse <iteration_complete> marker
+  ITER_COMPLETE_MARKER=$(extract_regex "$LAST_OUTPUT" '<iteration_complete[^>]*test_file="([^"]+)"')
+
+  if [[ -n "$ITER_COMPLETE_MARKER" ]]; then
+    # Marker found - verify commit exists
+    # Check for test-related commit in last 5 commits
+    if git log --oneline -5 2>/dev/null | grep -qiE "^[a-f0-9]+ test"; then
+      # Commit found - log and continue to advance
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION_VERIFIED\",\"iteration\":$ITERATION,\"test_file\":\"$ITER_COMPLETE_MARKER\",\"notes\":\"Iteration $ITERATION complete - marker and commit verified\"}"
+      echo "✓ Loop ($ACTIVE_LOOP): Iteration $ITERATION complete - $ITER_COMPLETE_MARKER"
+    else
+      # Marker but no commit - remind to commit
+      PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+      SYSTEM_MSG="⚠️  Loop ($ACTIVE_LOOP): Found <iteration_complete> but NO COMMIT. Commit your test: git add && git commit -m \"test(...): ...\""
+
+      jq -n \
+        --arg prompt "$PROMPT_TEXT" \
+        --arg msg "$SYSTEM_MSG" \
+        '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
+  else
+    # No marker - don't advance, ask to complete iteration
+    PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+    SYSTEM_MSG="⚠️  Loop ($ACTIVE_LOOP): Iteration $ITERATION incomplete. After committing your test, output: <iteration_complete test_file=\"path/to/test.ts\"/>"
+
+    jq -n \
+      --arg prompt "$PROMPT_TEXT" \
+      --arg msg "$SYSTEM_MSG" \
+      '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+    exit 0
   fi
 fi
 

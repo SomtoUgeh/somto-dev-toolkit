@@ -341,8 +341,22 @@ Invalid uses (write a test instead):
 4. Run \`$TEST_COMMAND\` again - coverage should increase as a side effect of testing real behavior
 5. **Lint & format** - run project's lint/format commands, fix any errors
 6. Commit with message: \`test(<file>): <describe the user behavior being tested>\`
+7. **Signal iteration complete** with structured output (see below)
 
-Progress is automatically logged to \`.claude/ut-progress.txt\` by the stop hook.
+## Iteration Complete Signal
+
+After committing, output this marker so the hook can verify and advance:
+
+\`\`\`
+<iteration_complete test_file="path/to/file.test.ts"/>
+\`\`\`
+
+The hook will:
+- Verify your commit exists
+- Log progress
+- Advance to next iteration
+
+**If you don't output this marker, the iteration won't advance.**
 
 ## Completion
 
