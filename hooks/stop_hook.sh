@@ -159,6 +159,39 @@ UT_STATE=".claude/ut-loop-${SESSION_ID}.local.md"
 E2E_STATE=".claude/e2e-loop-${SESSION_ID}.local.md"
 PRD_STATE=".claude/prd-loop-${SESSION_ID}.local.md"
 
+# =============================================================================
+# Session Indexing for qmd (background, non-blocking)
+# =============================================================================
+# This trap runs on exit to index the current session for /fork-detect
+# Only indexes if no active loop (session truly ending) and qmd is available
+index_session_for_qmd() {
+  # Skip if a loop is active (will block, not truly exiting)
+  [[ -f "$GO_STATE" || -f "$UT_STATE" || -f "$E2E_STATE" || -f "$PRD_STATE" ]] && return 0
+
+  # Skip if qmd not installed
+  command -v qmd &>/dev/null || return 0
+
+  # Get project path from hook input
+  local project_path
+  project_path=$(echo "$HOOK_INPUT" | jq -r '.cwd // ""')
+  [[ -z "$project_path" ]] && return 0
+
+  # Derive session file path
+  local project_dir_name="-$(echo "$project_path" | tr '/' '-')"
+  local session_file="$HOME/.claude/projects/$project_dir_name/${SESSION_ID}.jsonl"
+  [[ -f "$session_file" ]] || return 0
+
+  # Background process - won't block session exit
+  (
+    sleep 2  # Wait for session file to finalize
+    CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(dirname "$(dirname "$0")")}"
+    "$CLAUDE_PLUGIN_ROOT/scripts/sync-sessions-to-qmd.sh" \
+      --single "$session_file" "$SESSION_ID" "$project_path" 2>/dev/null
+  ) &
+  disown
+}
+trap index_session_for_qmd EXIT
+
 ACTIVE_LOOP=""
 STATE_FILE=""
 
