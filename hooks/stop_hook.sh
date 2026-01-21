@@ -1,8 +1,51 @@
 #!/bin/bash
 
-# Unified Stop Hook
-# Handles all loop types: go, ut, e2e
-# Prevents session exit when any loop is active
+# =============================================================================
+# UNIFIED STOP HOOK - Architecture Overview
+# =============================================================================
+#
+# PURPOSE: Intercepts session exit to enforce iterative workflows (loops).
+#          When a loop is active, blocks exit and feeds prompts back to Claude.
+#
+# SUPPORTED LOOPS:
+#   - go:  Generic task loop OR PRD-based story implementation
+#   - ut:  Unit test coverage improvement loop
+#   - e2e: Playwright E2E test development loop
+#   - prd: PRD generation workflow (6 phases with structured output markers)
+#
+# CONTROL FLOW:
+#   1. GUARDS: Check for recursion, validate session_id, find active loop
+#   2. PARSE:  Read state file frontmatter (YAML between first two ---)
+#   3. LIMITS: Check iteration/once mode, enforce max_iterations
+#   4. OUTPUT: Parse Claude's last output for structured markers
+#   5. ROUTE:  Branch to loop-specific logic:
+#      - PRD: Phase transitions via <phase_complete>, <gate_decision>, etc.
+#      - Go/PRD mode: Story completion via <story_complete>, <reviews_complete>
+#      - UT/E2E: Iteration via <iteration_complete>, <reviews_complete>
+#   6. BLOCK:  Output JSON to block exit and inject next prompt
+#
+# STATE FILES: .claude/{go,ut,e2e,prd}-loop-{session_id}.local.md
+#   Format: YAML frontmatter (---...---) + markdown body (prompt)
+#   Key fields: iteration, max_iterations, completion_promise, current_phase, etc.
+#
+# STRUCTURED OUTPUT MARKERS (parsed from Claude's response):
+#   - <phase_complete phase="N" .../>  - PRD phase transitions
+#   - <gate_decision>PROCEED|BLOCK</gate_decision> - PRD review gate
+#   - <max_iterations>N</max_iterations> - PRD complexity estimate
+#   - <story_complete story_id="N"/> - Go/PRD story completion
+#   - <iteration_complete test_file="..."/> - UT/E2E iteration
+#   - <reviews_complete/> - Confirms code reviews ran
+#   - <promise>TEXT</promise> - Loop completion signal
+#
+# SECURITY HARDENING:
+#   - Session ID validation (alphanumeric only, no path traversal)
+#   - sed escaping for user-derived values (escape_sed_replacement)
+#   - Frontmatter parsing scoped to first two --- only
+#   - Phase marker validation (must match current phase)
+#   - Story ID word boundaries (prevents #1 matching #10)
+#   - Recovery prompts for malformed state (vs silent abort)
+#
+# =============================================================================
 
 set -euo pipefail
 
@@ -24,8 +67,42 @@ extract_regex() {
   fi
 }
 
+# Usage: extract_regex_last "string" "pattern_with_capture_group"
+# Returns LAST match's capture group (useful for markers that may appear in examples)
+extract_regex_last() {
+  local string="$1"
+  local pattern="$2"
+  local last_match=""
+
+  # Iterate through all matches, keeping the last one
+  local remaining="$string"
+  while [[ $remaining =~ $pattern ]]; do
+    last_match="${BASH_REMATCH[1]}"
+    # Remove matched portion and continue searching
+    remaining="${remaining#*"${BASH_REMATCH[0]}"}"
+  done
+
+  [[ -n "$last_match" ]] && printf '%s' "$last_match"
+}
+
+# Escape special characters for sed replacement string
+# Escapes: / & \ | newlines (prevents injection when variable contains these)
+# Usage: ESCAPED=$(escape_sed_replacement "$UNSAFE_VALUE")
+escape_sed_replacement() {
+  local str="$1"
+  # Escape backslashes first, then other special chars
+  str="${str//\\/\\\\}"
+  str="${str//\//\\/}"
+  str="${str//&/\\&}"
+  str="${str//|/\\|}"
+  # Replace newlines with \n (literal)
+  str="${str//$'\n'/\\n}"
+  printf '%s' "$str"
+}
+
 # Portable sed in-place edit (works on macOS, Linux, Windows Git Bash)
 # Usage: sed_inplace "s/old/new/" "file"
+# WARNING: If replacement contains user input, use escape_sed_replacement first!
 sed_inplace() {
   local expr="$1"
   local file="$2"
@@ -154,6 +231,29 @@ fi
 # Extract session_id to scope state files per-session (prevents cross-instance interference)
 SESSION_ID=$(echo "$HOOK_INPUT" | jq -r '.session_id // "default"')
 
+# Sanitize SESSION_ID to prevent path traversal (only allow alphanumeric, hyphen, underscore)
+if [[ ! "$SESSION_ID" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "Error: Invalid session_id format '$SESSION_ID' (must be alphanumeric/hyphen/underscore only)" >&2
+  # Check if ANY loop state files exist - list them so user can clean up stale files
+  STATE_FILES=$(ls .claude/*-loop-*.local.md 2>/dev/null || true)
+  if [[ -n "$STATE_FILES" ]]; then
+    echo "       Loop state files found (may be stale):" >&2
+    echo "$STATE_FILES" | while read -r f; do
+      if [[ -n "$f" ]]; then
+        MTIME=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$f" 2>/dev/null || stat -c "%y" "$f" 2>/dev/null | cut -d. -f1 || echo "unknown")
+        echo "         - $f (modified: $MTIME)" >&2
+      fi
+    done
+    echo "" >&2
+    echo "       If these are stale, remove them: rm .claude/*-loop-*.local.md" >&2
+    # Allow exit since we can't validate which session owns these files
+    echo "       Allowing exit (can't validate session ownership)." >&2
+    exit 0
+  fi
+  echo "       No active loops. Allowing exit." >&2
+  exit 0
+fi
+
 GO_STATE=".claude/go-loop-${SESSION_ID}.local.md"
 UT_STATE=".claude/ut-loop-${SESSION_ID}.local.md"
 E2E_STATE=".claude/e2e-loop-${SESSION_ID}.local.md"
@@ -217,18 +317,120 @@ fi
 # =============================================================================
 # Parse state file frontmatter
 # =============================================================================
+# Parses YAML frontmatter between first two --- delimiters only
+# Safe against --- appearing later in the file body (e.g., in code blocks)
+# Returns 1 on malformed input (caller should handle with recovery prompt)
 parse_frontmatter() {
   local file="$1"
-  sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$file"
+  # Get line numbers of first two --- delimiters
+  # Use || true to prevent pipeline exit under set -e when no --- found
+  local delimiters
+  delimiters=$(grep -n '^---$' "$file" 2>/dev/null | head -2 | cut -d: -f1 || true)
+
+  # Handle empty result (no --- delimiters found)
+  if [[ -z "$delimiters" ]]; then
+    echo "Error: No frontmatter delimiters found in $file" >&2
+    return 1
+  fi
+
+  local first_delim second_delim
+  first_delim=$(echo "$delimiters" | head -1)
+  second_delim=$(echo "$delimiters" | tail -1)
+
+  # Validate: first delimiter should be line 1, second should exist and be different
+  if [[ "$first_delim" != "1" ]] || [[ -z "$second_delim" ]] || [[ "$first_delim" == "$second_delim" ]]; then
+    echo "Error: Invalid frontmatter format in $file" >&2
+    return 1
+  fi
+
+  # Extract lines between delimiters (exclusive)
+  sed -n "2,$((second_delim - 1))p" "$file"
 }
 
 get_field() {
   local frontmatter="$1"
   local field="$2"
-  echo "$frontmatter" | grep "^${field}:" | sed "s/${field}: *//" | tr -d '"' || true
+  # Use head -1 to handle duplicate keys (return first occurrence only)
+  echo "$frontmatter" | grep "^${field}:" | head -1 | sed "s/${field}: *//" | tr -d '"' || true
 }
 
-FRONTMATTER=$(parse_frontmatter "$STATE_FILE")
+# Validate state file fields based on loop type
+# Returns 0 if valid, 1 if invalid (with error message to stderr)
+validate_state_file() {
+  local frontmatter="$1"
+  local expected_loop="$2"
+  local state_file="$3"
+
+  # Get loop_type from frontmatter
+  local loop_type
+  loop_type=$(get_field "$frontmatter" "loop_type")
+
+  # Validate loop_type matches detected active loop
+  if [[ -z "$loop_type" ]]; then
+    echo "Error: State file missing 'loop_type' field" >&2
+    return 1
+  fi
+  if [[ "$loop_type" != "$expected_loop" ]]; then
+    echo "Error: State file loop_type '$loop_type' doesn't match detected loop '$expected_loop'" >&2
+    return 1
+  fi
+
+  # Loop-specific validation
+  case "$loop_type" in
+    prd)
+      local phase
+      phase=$(get_field "$frontmatter" "current_phase")
+      if [[ -z "$phase" ]]; then
+        echo "Error: PRD state file missing 'current_phase' field" >&2
+        return 1
+      fi
+      # Valid phases: 1, 2, 2.5, 3, 3.2, 3.5, 4, 5, 5.5, 6
+      case "$phase" in
+        1|2|2.5|3|3.2|3.5|4|5|5.5|6) ;;  # Valid
+        *)
+          echo "Error: Invalid PRD phase '$phase' (valid: 1, 2, 2.5, 3, 3.2, 3.5, 4, 5, 5.5, 6)" >&2
+          return 1
+          ;;
+      esac
+      ;;
+    go|ut|e2e)
+      local iteration
+      iteration=$(get_field "$frontmatter" "iteration")
+      if [[ -z "$iteration" ]]; then
+        echo "Error: State file missing 'iteration' field" >&2
+        return 1
+      fi
+      ;;
+  esac
+
+  return 0
+}
+
+# Parse frontmatter with error handling - malformed state files get recovery prompt
+if ! FRONTMATTER=$(parse_frontmatter "$STATE_FILE"); then
+  echo "⚠️  Loop ($ACTIVE_LOOP): Malformed state file - invalid frontmatter" >&2
+  echo "   State file: $STATE_FILE" >&2
+  echo "" >&2
+  echo "   Options:" >&2
+  echo "     - Check the state file for missing/extra --- delimiters" >&2
+  echo "     - Delete the state file to end the loop: rm \"$STATE_FILE\"" >&2
+  echo "     - Manually fix the frontmatter format" >&2
+  # Block with recovery prompt instead of aborting
+  jq -n --arg msg "Loop ($ACTIVE_LOOP): State file has invalid frontmatter. Delete $STATE_FILE to reset, or fix manually." \
+    '{"decision": "block", "reason": "State file corrupted - check frontmatter format", "systemMessage": $msg}'
+  exit 0
+fi
+
+# Validate state file fields
+if ! validate_state_file "$FRONTMATTER" "$ACTIVE_LOOP" "$STATE_FILE"; then
+  echo "⚠️  Loop ($ACTIVE_LOOP): State file validation failed" >&2
+  echo "   State file: $STATE_FILE" >&2
+  echo "" >&2
+  echo "   Loop is stopping. Run /$ACTIVE_LOOP again to start fresh." >&2
+  rm "$STATE_FILE"
+  exit 0
+fi
+
 ITERATION=$(get_field "$FRONTMATTER" "iteration")
 MAX_ITERATIONS=$(get_field "$FRONTMATTER" "max_iterations")
 COMPLETION_PROMISE=$(get_field "$FRONTMATTER" "completion_promise")
@@ -386,15 +588,16 @@ if [[ "$ACTIVE_LOOP" == "prd" ]]; then
   GATE_DECISION=""
 
   if [[ -n "$LAST_OUTPUT" ]]; then
+    # Use extract_regex_last to get the LAST occurrence (markers may appear in examples/docs)
     # <phase_complete phase="N" feature_name="NAME"/>
-    PHASE_COMPLETE=$(extract_regex "$LAST_OUTPUT" '<phase_complete phase="([^"]+)"')
-    PHASE_FEATURE=$(extract_regex "$LAST_OUTPUT" '<phase_complete[^>]*feature_name="([^"]+)"')
+    PHASE_COMPLETE=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete phase="([^"]+)"')
+    PHASE_FEATURE=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*feature_name="([^"]+)"')
 
     # <max_iterations>N</max_iterations>
-    MAX_ITER_TAG=$(extract_regex "$LAST_OUTPUT" '<max_iterations>([0-9]+)</max_iterations>')
+    MAX_ITER_TAG=$(extract_regex_last "$LAST_OUTPUT" '<max_iterations>([0-9]+)</max_iterations>')
 
     # <gate_decision>PROCEED|BLOCK</gate_decision>
-    GATE_DECISION=$(extract_regex "$LAST_OUTPUT" '<gate_decision>([^<]+)</gate_decision>')
+    GATE_DECISION=$(extract_regex_last "$LAST_OUTPUT" '<gate_decision>([^<]+)</gate_decision>')
   fi
 
   # Helper function to generate phase-specific prompt
@@ -455,17 +658,39 @@ This triggers research phase before continuing interview."
 
 PAUSE interviewing. Spawn research agents IN PARALLEL (single message, multiple Task tool calls):
 
+### Core Research Agents
+
 1. **Codebase Research**
-   - subagent_type: \"prd-codebase-researcher\"
+   - subagent_type: \"somto-dev-toolkit:prd-codebase-researcher\"
+   - max_turns: 30
    - prompt: \"Research codebase for $FEATURE_NAME. Find existing patterns, files to modify, models, services, test patterns.\"
 
 2. **Git History**
    - subagent_type: \"compound-engineering:research:git-history-analyzer\"
+   - max_turns: 30
    - prompt: \"Analyze git history for code related to $FEATURE_NAME. Find prior attempts, key contributors, why patterns evolved.\"
 
-3. **External Research**
-   - subagent_type: \"prd-external-researcher\"
+3. **External Research (Exa)**
+   - subagent_type: \"somto-dev-toolkit:prd-external-researcher\"
+   - max_turns: 15
    - prompt: \"Research $FEATURE_NAME using Exa. Find best practices, code examples, pitfalls to avoid.\"
+
+### Optional: Live Site Research (if UI/UX feature or competitor analysis needed)
+
+4. **Agent-Browser Research** - Use if feature involves:
+   - UI/UX patterns that need visual examples
+   - Competitor implementations to study
+   - Live API documentation to extract
+
+   Use agent-browser CLI via Bash (ref: compound-engineering:agent-browser skill):
+   \`\`\`bash
+   agent-browser open \"https://competitor.com/feature\"
+   agent-browser snapshot -i --json    # Get interactive elements with refs (@e1, @e2)
+   agent-browser click @e1             # Interact using refs
+   agent-browser screenshot --full competitor.png
+   \`\`\`
+
+   Key pattern: open → snapshot → interact → re-snapshot after DOM changes.
 
 After all agents return, store findings and output:
 \`\`\`
@@ -518,32 +743,110 @@ After writing spec, output:
 <phase_complete phase=\"3\" spec_path=\"plans/$FEATURE_NAME/spec.md\"/>
 \`\`\`"
         ;;
-      "3.5")
-        prompt="# PRD Loop: Phase 3.5 - Spec Review
+      "3.2")
+        prompt="# PRD Loop: Phase 3.2 - Skill Discovery & Enrichment
 
 **Feature:** $FEATURE_NAME
 **Spec:** \`$SPEC_PATH\`
 
 ## Your Task
 
-Spawn 4 reviewers IN PARALLEL (single message, multiple Task tool calls).
+Discover relevant skills and enrich the spec with implementation patterns.
+
+### Step 1: Discover Skills
+
+Search for matching skills using Glob:
+- \`~/.claude/skills/**/*.md\`
+- \`.claude/skills/**/*.md\`
+- Check installed plugins for skill definitions
+
+### Step 2: Match Skills to Spec
+
+Read the spec and identify technologies/patterns mentioned. Match against skills like:
+- **dhh-rails-style** - Rails conventions
+- **frontend-design** - UI/component patterns
+- **agent-native-architecture** - AI agent features
+- **dspy-ruby** - LLM application patterns
+- Any project-specific skills
+
+### Step 3: Spawn Skill Agents IN PARALLEL
+
+For each matched skill, spawn a sub-agent:
+\`\`\`
+Task tool:
+- subagent_type: \"Explore\"
+- max_turns: 15
+- prompt: \"Read skill at [PATH]. Extract implementation patterns relevant to [FEATURE]. Return: patterns, anti-patterns, code examples, constraints.\"
+\`\`\`
+
+### Step 4: Enrich Spec
+
+Add a new section to the spec:
+\`\`\`markdown
+## Implementation Patterns (from Skills)
+
+### [Skill Name]
+- **Pattern**: ...
+- **Anti-pattern**: ...
+- **Example**: ...
+\`\`\`
+
+After enriching spec, output:
+\`\`\`
+<phase_complete phase=\"3.2\"/>
+\`\`\`"
+        ;;
+      "3.5")
+        prompt="# PRD Loop: Phase 3.5 - Spec Review (Multi-Dimensional)
+
+**Feature:** $FEATURE_NAME
+**Spec:** \`$SPEC_PATH\`
+
+## Your Task
+
+Spawn ALL reviewers IN PARALLEL (single message, multiple Task tool calls).
 Read the spec first, then pass content to each reviewer.
 
-1. **Flow Analysis**
+### Core Reviewers (always run)
+
+1. **Flow Analysis** - User journeys, edge cases, missing flows
    - subagent_type: \"compound-engineering:workflow:spec-flow-analyzer\"
+   - max_turns: 20
 
-2. **Architecture Review**
+2. **Architecture Review** - System design, component boundaries
    - subagent_type: \"compound-engineering:review:architecture-strategist\"
+   - max_turns: 20
 
-3. **Security Review**
+3. **Security Review** - Auth, data exposure, OWASP concerns
    - subagent_type: \"compound-engineering:review:security-sentinel\"
+   - max_turns: 20
 
-4. **Plan Review**
-   - subagent_type: \"compound-engineering:plan_review\"
+4. **Performance Review** - Scalability, bottlenecks, caching needs
+   - subagent_type: \"compound-engineering:review:performance-oracle\"
+   - max_turns: 20
+
+5. **Simplicity Review** - Is spec overcomplicated? YAGNI violations?
+   - subagent_type: \"compound-engineering:review:code-simplicity-reviewer\"
+   - max_turns: 15
+
+6. **Pattern Review** - Does it follow existing codebase patterns?
+   - subagent_type: \"compound-engineering:review:pattern-recognition-specialist\"
+   - max_turns: 20
+
+### Domain-Specific Reviewers (if applicable)
+
+7. **Data Integrity** - If spec involves data models/migrations
+   - subagent_type: \"compound-engineering:review:data-integrity-guardian\"
+   - max_turns: 20
+
+8. **Agent-Native** - If spec involves AI/agent features
+   - subagent_type: \"compound-engineering:review:agent-native-reviewer\"
+   - max_turns: 15
 
 **After reviews complete:**
 - Add critical items to spec's \"Review Findings\" section
 - Update User Stories if reviewers found missing flows
+- Prioritize findings by severity (Critical > High > Medium)
 
 **Gate Decision:**
 If critical security/architecture issues found, use AskUserQuestion:
@@ -643,21 +946,25 @@ After creating progress file, output:
 **PRD:** \`$PRD_PATH\`
 **Spec:** \`$SPEC_PATH\`
 
-## Your Task
+## MANDATORY: Spawn Complexity Estimator Agent
 
-Spawn the complexity estimator agent:
+You MUST spawn this agent NOW using the Task tool. Do NOT skip this step. Do NOT make up a value.
 
-- subagent_type: \"prd-complexity-estimator\"
+\`\`\`
+Task tool call:
+- subagent_type: \"somto-dev-toolkit:prd-complexity-estimator\"
+- max_turns: 20
 - prompt: \"Estimate complexity for this PRD. <prd_json>{read PRD}</prd_json> <spec_content>{read spec}</spec_content>\"
+\`\`\`
 
-The agent will research the codebase and return a recommended max_iterations value.
+WAIT for the agent to return. Use the agent's recommended value.
 
-**REQUIRED:** After the agent returns, output:
+**After agent returns**, output EXACTLY:
 \`\`\`
 <max_iterations>N</max_iterations>
 \`\`\`
 
-Where N is the agent's recommended value."
+Where N is the value from the agent (NOT a guess, NOT a default)."
         ;;
       "6")
         prompt="# PRD Loop: Phase 6 - Generate Go Command
@@ -713,6 +1020,8 @@ After user responds, output:
   esac
 
   # Check if we got a valid marker for the current phase
+  # IMPORTANT: For phase_complete, must also validate phase attribute matches current phase
+  # to prevent wrong-phase markers from resetting retry count and causing infinite loops
   VALID_MARKER_FOUND=false
   case "$CURRENT_PHASE" in
     "5.5")
@@ -722,7 +1031,8 @@ After user responds, output:
       [[ -n "$GATE_DECISION" ]] && VALID_MARKER_FOUND=true
       ;;
     *)
-      [[ -n "$PHASE_COMPLETE" ]] && VALID_MARKER_FOUND=true
+      # Only valid if phase attribute matches current phase
+      [[ -n "$PHASE_COMPLETE" ]] && [[ "$PHASE_COMPLETE" == "$CURRENT_PHASE" ]] && VALID_MARKER_FOUND=true
       ;;
   esac
 
@@ -743,7 +1053,9 @@ After user responds, output:
     else
       ERROR_SUMMARY="No text output from Claude (only tool calls)"
     fi
-    sed_inplace "s/^last_error: .*/last_error: \"$ERROR_SUMMARY\"/" "$STATE_FILE"
+    # Escape for sed replacement to handle /, &, \ in error messages
+    ESCAPED_ERROR=$(escape_sed_replacement "$ERROR_SUMMARY")
+    sed_inplace "s/^last_error: .*/last_error: \"$ESCAPED_ERROR\"/" "$STATE_FILE"
 
     if [[ $RETRY_COUNT -ge $MAX_RETRIES ]]; then
       # Max retries reached - stop and ask user for help
@@ -799,8 +1111,9 @@ $(generate_prd_phase_prompt "$CURRENT_PHASE")"
     fi
   fi
 
-  # Update feature name if provided in phase completion
-  if [[ -n "$PHASE_FEATURE" ]]; then
+  # Update feature name ONLY from phase 1 marker (input classification)
+  # Restricting to phase 1 prevents stray examples from mutating state in later phases
+  if [[ -n "$PHASE_FEATURE" ]] && [[ "$CURRENT_PHASE" == "1" ]] && [[ "$PHASE_COMPLETE" == "1" ]]; then
     FEATURE_NAME="$PHASE_FEATURE"
   fi
 
@@ -838,9 +1151,11 @@ $(generate_prd_phase_prompt "$CURRENT_PHASE")"
   fi
 
   # Generic phase completion
-  if [[ -n "$PHASE_COMPLETE" ]]; then
+  # IMPORTANT: Validate that phase attribute matches current phase to prevent
+  # accidental advancement from example markers in documentation/output
+  if [[ -n "$PHASE_COMPLETE" ]] && [[ "$PHASE_COMPLETE" == "$CURRENT_PHASE" ]]; then
     # Extract next phase from marker if present
-    MARKER_NEXT=$(extract_regex "$LAST_OUTPUT" '<phase_complete[^>]*next="([^"]+)"')
+    MARKER_NEXT=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*next="([^"]+)"')
 
     # Determine next phase based on current phase
     case "$CURRENT_PHASE" in
@@ -856,30 +1171,34 @@ $(generate_prd_phase_prompt "$CURRENT_PHASE")"
         ;;
       "2.5") NEXT_PHASE="${MARKER_NEXT:-2}" ;;  # Back to interview
       "3")
-        NEXT_PHASE="3.5"
+        NEXT_PHASE="3.2"
         # Extract spec_path from marker
-        MARKER_SPEC=$(extract_regex "$LAST_OUTPUT" '<phase_complete[^>]*spec_path="([^"]+)"')
+        MARKER_SPEC=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*spec_path="([^"]+)"')
         if [[ -n "$MARKER_SPEC" ]]; then
           SPEC_PATH="$MARKER_SPEC"
-          sed_inplace "s|^spec_path: .*|spec_path: \"$SPEC_PATH\"|" "$STATE_FILE"
+          ESCAPED_PATH=$(escape_sed_replacement "$SPEC_PATH")
+          sed_inplace "s|^spec_path: .*|spec_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
         fi
         ;;
+      "3.2") NEXT_PHASE="3.5" ;;  # Skill enrichment → Review gate
       "3.5") NEXT_PHASE="4" ;;  # Only reached if gate_decision not detected
       "4")
         NEXT_PHASE="5"
         # Extract prd_path from marker
-        MARKER_PRD=$(extract_regex "$LAST_OUTPUT" '<phase_complete[^>]*prd_path="([^"]+)"')
+        MARKER_PRD=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*prd_path="([^"]+)"')
         if [[ -n "$MARKER_PRD" ]]; then
           PRD_PATH="$MARKER_PRD"
-          sed_inplace "s|^prd_path: .*|prd_path: \"$PRD_PATH\"|" "$STATE_FILE"
+          ESCAPED_PATH=$(escape_sed_replacement "$PRD_PATH")
+          sed_inplace "s|^prd_path: .*|prd_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
         fi
         ;;
       "5")
         NEXT_PHASE="5.5"
         # Extract progress_path from marker
-        MARKER_PROGRESS=$(extract_regex "$LAST_OUTPUT" '<phase_complete[^>]*progress_path="([^"]+)"')
+        MARKER_PROGRESS=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*progress_path="([^"]+)"')
         if [[ -n "$MARKER_PROGRESS" ]]; then
-          sed_inplace "s|^progress_path: .*|progress_path: \"$MARKER_PROGRESS\"|" "$STATE_FILE"
+          ESCAPED_PATH=$(escape_sed_replacement "$MARKER_PROGRESS")
+          sed_inplace "s|^progress_path: .*|progress_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
         fi
         ;;
       "5.5") NEXT_PHASE="6" ;;
@@ -905,8 +1224,9 @@ $(generate_prd_phase_prompt "$CURRENT_PHASE")"
   # Update state file with new phase
   sed_inplace "s/^current_phase: .*/current_phase: \"$NEXT_PHASE\"/" "$STATE_FILE"
 
-  # Update feature_name if changed
-  sed_inplace "s/^feature_name: .*/feature_name: \"$FEATURE_NAME\"/" "$STATE_FILE"
+  # Update feature_name if changed (escape for sed to handle special chars)
+  ESCAPED_FEATURE=$(escape_sed_replacement "$FEATURE_NAME")
+  sed_inplace "s/^feature_name: .*/feature_name: \"$ESCAPED_FEATURE\"/" "$STATE_FILE"
 
   # Generate new phase prompt
   PROMPT_TEXT=$(generate_prd_phase_prompt "$NEXT_PHASE")
@@ -961,13 +1281,69 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
   TOTAL_STORIES=$(get_field "$FRONTMATTER" "total_stories")
 
   if [[ -f "$PRD_PATH" ]] && jq empty "$PRD_PATH" 2>/dev/null; then
+    # Parse structured output markers
+    REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
+    STORY_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<story_complete[^>]*story_id="([^"]+)"')
     CURRENT_PASSES=$(jq ".stories[] | select(.id == $CURRENT_STORY_ID) | .passes" "$PRD_PATH" 2>/dev/null || echo "false")
+    STORY_TITLE=$(jq -r ".stories[] | select(.id == $CURRENT_STORY_ID) | .title" "$PRD_PATH")
 
-    if [[ "$CURRENT_PASSES" == "true" ]]; then
-      # Story passes - check for commit
-      STORY_TITLE=$(jq -r ".stories[] | select(.id == $CURRENT_STORY_ID) | .title" "$PRD_PATH")
+    # Step 1: Check for story_complete marker (MANDATORY structured output)
+    if [[ -z "$STORY_COMPLETE_MARKER" ]]; then
+      # No marker yet - check what's missing
+      PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
 
-      if git log --oneline -10 2>/dev/null | grep -qiE "(story.*#?${CURRENT_STORY_ID}|#${CURRENT_STORY_ID}|story ${CURRENT_STORY_ID})"; then
+      if [[ "$CURRENT_PASSES" != "true" ]]; then
+        SYSTEM_MSG="🔄 Loop (go/prd): Story #$CURRENT_STORY_ID not yet passing. Update prd.json when tests pass."
+      elif [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
+        SYSTEM_MSG="⚠️  Loop (go/prd): Story #$CURRENT_STORY_ID passes but REVIEWS NOT run.
+
+**REQUIRED steps:**
+1. Run code-simplifier: \`pr-review-toolkit:code-simplifier\` (max_turns: 15)
+2. Run Kieran reviewer for your code type (max_turns: 20)
+3. Address ALL findings
+4. Output: \`<reviews_complete/>\`
+5. Commit with story reference
+6. Output: \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
+      else
+        # Reviews done, passes true, but no story_complete marker
+        SYSTEM_MSG="⚠️  Loop (go/prd): Reviews done ✓ Story passes ✓ Now commit and output:
+\`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
+      fi
+
+      jq -n \
+        --arg prompt "$PROMPT_TEXT" \
+        --arg msg "$SYSTEM_MSG" \
+        '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
+
+    # Step 2: Verify story_complete marker matches current story
+    if [[ "$STORY_COMPLETE_MARKER" != "$CURRENT_STORY_ID" ]]; then
+      PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+      SYSTEM_MSG="⚠️  Loop (go/prd): story_id mismatch. Expected $CURRENT_STORY_ID, got $STORY_COMPLETE_MARKER"
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
+
+    # Step 3: Verify prd.json shows passes: true
+    if [[ "$CURRENT_PASSES" != "true" ]]; then
+      PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+      SYSTEM_MSG="⚠️  Loop (go/prd): <story_complete/> found but prd.json shows passes: false. Update prd.json first."
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
+
+    # Step 4: Verify reviews were run
+    if [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
+      PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+      SYSTEM_MSG="⚠️  Loop (go/prd): <story_complete/> found but <reviews_complete/> missing. Run reviews first."
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
+
+    # Step 5: Verify commit exists
+    # Use word boundary ([^0-9]|$) to prevent #1 matching #10, #11, etc.
+    if git log --oneline -10 2>/dev/null | grep -qiE "(story.*#?${CURRENT_STORY_ID}([^0-9]|$)|#${CURRENT_STORY_ID}([^0-9]|$)|story ${CURRENT_STORY_ID}([^0-9]|$))"; then
         # Commit found - log and advance
         if [[ -f "$PROGRESS_PATH" ]]; then
           echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"PASSED\",\"notes\":\"Story #$CURRENT_STORY_ID complete\"}" >> "$PROGRESS_PATH"
@@ -1108,7 +1484,6 @@ CRITICAL: Only mark the story as passing when it genuinely passes all verificati
           '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
         exit 0
       fi
-    fi
   fi
 fi
 
@@ -1116,31 +1491,50 @@ fi
 # Verify iteration completion for ut/e2e loops (structured output control flow)
 # =============================================================================
 if [[ "$ACTIVE_LOOP" == "ut" ]] || [[ "$ACTIVE_LOOP" == "e2e" ]]; then
-  # Parse <iteration_complete> marker
-  ITER_COMPLETE_MARKER=$(extract_regex "$LAST_OUTPUT" '<iteration_complete[^>]*test_file="([^"]+)"')
+  # Parse markers
+  REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
+  ITER_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<iteration_complete[^>]*test_file="([^"]+)"')
 
-  if [[ -n "$ITER_COMPLETE_MARKER" ]]; then
-    # Marker found - verify commit exists
-    # Check for test-related commit in last 5 commits
-    if git log --oneline -5 2>/dev/null | grep -qiE "^[a-f0-9]+ test"; then
-      # Commit found - log and continue to advance
-      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION_VERIFIED\",\"iteration\":$ITERATION,\"test_file\":\"$ITER_COMPLETE_MARKER\",\"notes\":\"Iteration $ITERATION complete - marker and commit verified\"}"
-      echo "✓ Loop ($ACTIVE_LOOP): Iteration $ITERATION complete - $ITER_COMPLETE_MARKER"
-    else
-      # Marker but no commit - remind to commit
-      PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-      SYSTEM_MSG="⚠️  Loop ($ACTIVE_LOOP): Found <iteration_complete> but NO COMMIT. Commit your test: git add && git commit -m \"test(...): ...\""
-
-      jq -n \
-        --arg prompt "$PROMPT_TEXT" \
-        --arg msg "$SYSTEM_MSG" \
-        '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-      exit 0
-    fi
-  else
-    # No marker - don't advance, ask to complete iteration
+  # Step 1: Check for reviews_complete marker (MANDATORY)
+  if [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
     PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-    SYSTEM_MSG="⚠️  Loop ($ACTIVE_LOOP): Iteration $ITERATION incomplete. After committing your test, output: <iteration_complete test_file=\"path/to/test.ts\"/>"
+    SYSTEM_MSG="⚠️  Loop ($ACTIVE_LOOP): Reviews NOT run. You MUST run reviewers before completing iteration.
+
+**REQUIRED steps:**
+1. Run code-simplifier: \`pr-review-toolkit:code-simplifier\` (max_turns: 15)
+2. Run Kieran reviewer for your code type (max_turns: 20)
+3. Address ALL findings
+4. Output: \`<reviews_complete/>\`
+5. Then commit and output: \`<iteration_complete test_file=\"...\"/>\`"
+
+    jq -n \
+      --arg prompt "$PROMPT_TEXT" \
+      --arg msg "$SYSTEM_MSG" \
+      '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+    exit 0
+  fi
+
+  # Step 2: Check for iteration_complete marker
+  if [[ -z "$ITER_COMPLETE_MARKER" ]]; then
+    PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+    SYSTEM_MSG="⚠️  Loop ($ACTIVE_LOOP): Reviews done ✓ but iteration incomplete. Commit your test, then output: <iteration_complete test_file=\"path/to/test.ts\"/>"
+
+    jq -n \
+      --arg prompt "$PROMPT_TEXT" \
+      --arg msg "$SYSTEM_MSG" \
+      '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+    exit 0
+  fi
+
+  # Step 3: Verify commit exists
+  if git log --oneline -5 2>/dev/null | grep -qiE "^[a-f0-9]+ test"; then
+    # All checks passed - log and continue to advance
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION_VERIFIED\",\"iteration\":$ITERATION,\"test_file\":\"$ITER_COMPLETE_MARKER\",\"notes\":\"Iteration $ITERATION complete - reviews, marker, and commit verified\"}"
+    echo "✓ Loop ($ACTIVE_LOOP): Iteration $ITERATION complete - reviews ✓ commit ✓ $ITER_COMPLETE_MARKER"
+  else
+    # Markers but no commit - remind to commit
+    PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+    SYSTEM_MSG="⚠️  Loop ($ACTIVE_LOOP): Reviews done ✓ but NO COMMIT found. Commit your test: git add && git commit -m \"test(...): ...\""
 
     jq -n \
       --arg prompt "$PROMPT_TEXT" \

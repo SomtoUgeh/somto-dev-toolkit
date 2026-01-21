@@ -28,15 +28,24 @@ Each iteration, you must:
 3. **Write ONE meaningful test** that validates real user behavior
 4. **Run lint, format, and typecheck** the equivalent command in the codebase to ensure code quality
 5. **Run coverage again** to verify improvement
-6. **[MANDATORY] Run code-simplifier** - ALWAYS use `pr-review-toolkit:code-simplifier` to review changes. Address ALL suggestions.
-7. **[MANDATORY] Run Kieran review** - ALWAYS run based on what you changed:
+6. **[MANDATORY] Run code-simplifier** - ALWAYS use `pr-review-toolkit:code-simplifier` (max_turns: 15) to review changes. Address ALL suggestions.
+7. **[MANDATORY] Run Kieran review** - ALWAYS run based on what you changed (all max_turns: 20):
    - TypeScript/JavaScript: `compound-engineering:review:kieran-typescript-reviewer`
    - Python: `compound-engineering:review:kieran-python-reviewer`
    - Rails/Ruby: `compound-engineering:review:kieran-rails-reviewer`
    - Database/migrations/data models: `compound-engineering:review:data-integrity-guardian`
-   ⚠️ DO NOT skip steps 6-7. Address ALL review findings before step 8.
-8. **Commit** with message: `test(<file>): <describe behavior>`
-9. **Log progress** to `.claude/ut-progress.txt`
+8. **[MANDATORY] Output reviews marker** after addressing all findings:
+   ```
+   <reviews_complete/>
+   ```
+9. **Commit** with message: `test(<file>): <describe behavior>`
+10. **Output iteration marker**:
+    ```
+    <iteration_complete test_file="path/to/test.ts"/>
+    ```
+11. **Log progress** to `.claude/ut-progress.txt`
+
+⚠️ The stop hook ENFORCES steps 6-8. You cannot advance without `<reviews_complete/>` marker.
 
 ## Quality Expectations
 

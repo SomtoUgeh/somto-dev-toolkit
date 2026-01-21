@@ -60,11 +60,11 @@ Read the generated state file (path shown in setup output) and begin work.
 
 **REQUIRED**: You MUST run these agents before EVERY commit. No exceptions. Do not skip.
 
-1. **ALWAYS run code-simplifier first**: `pr-review-toolkit:code-simplifier`
+1. **ALWAYS run code-simplifier first**: `pr-review-toolkit:code-simplifier` (max_turns: 15)
    - Simplifies and cleans your changes
    - Address ALL suggestions before proceeding
 
-2. **ALWAYS run the appropriate Kieran reviewer**:
+2. **ALWAYS run the appropriate Kieran reviewer** (all max_turns: 20):
    - **TypeScript/JavaScript**: `compound-engineering:review:kieran-typescript-reviewer`
    - **Python**: `compound-engineering:review:kieran-python-reviewer`
    - **Rails/Ruby**: `compound-engineering:review:kieran-rails-reviewer`
@@ -72,7 +72,24 @@ Read the generated state file (path shown in setup output) and begin work.
 
 3. **Address ALL review findings** before committing
 
-⚠️ DO NOT commit until both reviews pass. This is non-negotiable.
+4. **[PRD MODE ONLY] Output reviews marker** after addressing all findings:
+   ```
+   <reviews_complete/>
+   ```
+
+5. **[PRD MODE ONLY] Commit**, then output story completion marker:
+   ```
+   <story_complete story_id="N"/>
+   ```
+   Where N is the current story ID.
+
+⚠️ In PRD mode, the stop hook ENFORCES the full sequence:
+1. `passes: true` in prd.json
+2. `<reviews_complete/>`
+3. Commit with story reference
+4. `<story_complete story_id="N"/>`
+
+You cannot advance to the next story without ALL markers.
 
 ## Completion
 
