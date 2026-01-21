@@ -77,11 +77,16 @@ options:
 Based on user selection:
 
 **If user selects a session:**
+Extract the session ID (UUID) from the `full_path`. The session ID is the filename without `.jsonl` extension.
+
+Example: `/Users/somto/.claude/projects/-Users-somto-code-myproject/75297972-8b57-4a71-8c73-a6fe71354dc9.jsonl`
+→ Session ID: `75297972-8b57-4a71-8c73-a6fe71354dc9`
+
 Output the fork command for them to run in a new terminal:
 ```
 To fork this session, run in a new terminal:
 
-claude --fork-session /full/path/to/session.jsonl
+claude --resume <session-id> --fork-session
 ```
 
 Note: Claude Code cannot fork itself mid-session. The user must start a new session with the fork flag.
