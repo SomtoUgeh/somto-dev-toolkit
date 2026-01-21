@@ -69,7 +69,7 @@ extract_regex() {
 
 # Usage: extract_regex_last "string" "pattern"
 # Returns LAST match's capture group (or full match if no capture group)
-# Handles patterns with or without capture groups, and glob metacharacters in matches
+# Handles patterns with or without capture groups, glob metacharacters, and backslashes (Windows paths)
 extract_regex_last() {
   local string="$1"
   local pattern="$2"
@@ -86,12 +86,22 @@ extract_regex_last() {
     else
       last_match="$full_match"
     fi
-    # Escape glob metacharacters before using in parameter expansion
-    local escaped_match="${full_match//\*/\\*}"
-    escaped_match="${escaped_match//\?/\\?}"
-    escaped_match="${escaped_match//\[/\\[}"
-    # Remove matched portion and continue searching
-    remaining="${remaining#*$escaped_match}"
+
+    # Find match position and use substring to advance (safer than pattern-based removal)
+    # This handles backslashes correctly (Windows paths like C:\tmp\spec.md)
+    local match_pos
+    match_pos=$(awk -v str="$remaining" -v needle="$full_match" 'BEGIN {
+      pos = index(str, needle)
+      if (pos > 0) print pos + length(needle) - 1
+      else print 0
+    }')
+
+    if [[ "$match_pos" -gt 0 ]] && [[ "$match_pos" -lt "${#remaining}" ]]; then
+      remaining="${remaining:$match_pos}"
+    else
+      # No more content after match, exit loop
+      break
+    fi
   done
 
   [[ -n "$last_match" ]] && printf '%s' "$last_match"
@@ -226,6 +236,18 @@ show_loop_summary() {
 
 # Read hook input from stdin
 HOOK_INPUT=$(cat)
+
+# Validate JSON input (prevents silent failures with set -e)
+if [[ -z "$HOOK_INPUT" ]]; then
+  echo "Error: No hook input received from stdin" >&2
+  exit 0  # Exit cleanly - no input means nothing to process
+fi
+
+if ! echo "$HOOK_INPUT" | jq empty 2>/dev/null; then
+  echo "Error: Hook input is not valid JSON" >&2
+  echo "Input received: ${HOOK_INPUT:0:200}..." >&2
+  exit 0  # Exit cleanly - can't process invalid input
+fi
 
 # =============================================================================
 # GUARD 1: Check stop_hook_active (CRITICAL - prevents infinite loops)
@@ -1285,8 +1307,8 @@ fi
 # Check for completion promise
 # =============================================================================
 if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]] && [[ -n "$LAST_OUTPUT" ]]; then
-  # Extract text from <promise> tags
-  PROMISE_TEXT=$(echo "$LAST_OUTPUT" | perl -0777 -pe 's/.*?<promise>(.*?)<\/promise>.*/$1/s; s/^\s+|\s+$//g; s/\s+/ /g' 2>/dev/null || echo "")
+  # Extract text from <promise> tags (use greedy .* to get LAST match, not first)
+  PROMISE_TEXT=$(echo "$LAST_OUTPUT" | perl -0777 -pe 's/.*<promise>(.*?)<\/promise>.*/$1/s; s/^\s+|\s+$//g; s/\s+/ /g' 2>/dev/null || echo "")
 
   if [[ -n "$PROMISE_TEXT" ]] && [[ "$PROMISE_TEXT" = "$COMPLETION_PROMISE" ]]; then
     echo "✅ Loop ($ACTIVE_LOOP): Detected <promise>$COMPLETION_PROMISE</promise>"
