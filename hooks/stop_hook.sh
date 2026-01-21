@@ -762,12 +762,24 @@ Search for matching skills using Glob:
 
 ### Step 2: Match Skills to Spec
 
-Read the spec and identify technologies/patterns mentioned. Match against skills like:
+Read the spec and identify technologies/patterns mentioned. Match against skills:
+
+**UI/React/Animation (MANDATORY for frontend features):**
+- **emil-design-engineering** - Polished, accessible UI (touch, a11y, forms, polish)
+- **web-animation-design** - Easing, timing, springs, motion performance
+- **vercel-react-best-practices** - React/Next.js performance optimization
+
+**Backend/Infrastructure:**
 - **dhh-rails-style** - Rails conventions
-- **frontend-design** - UI/component patterns
 - **agent-native-architecture** - AI agent features
 - **dspy-ruby** - LLM application patterns
+
+**General:**
+- **frontend-design** - General UI/component patterns
 - Any project-specific skills
+
+**Detection heuristics for UI skills:**
+If spec mentions: React, Next.js, component, button, form, input, modal, animation, transition, hover, CSS, Tailwind, TypeScript UI → load all 3 UI skills
 
 ### Step 3: Spawn Skill Agents IN PARALLEL
 
@@ -892,6 +904,12 @@ Parse User Stories from spec and create PRD JSON.
 - \"Handle success and error cases\" → 2 stories
 - Steps that depend on earlier steps succeeding → separate stories
 
+**Skill assignment (for ui/frontend stories):**
+- \`emil-design-engineering\` - Forms, inputs, buttons, touch, a11y, polish
+- \`web-animation-design\` - Animations, transitions, easing, springs
+- \`vercel-react-best-practices\` - React performance, hooks, rendering
+- Assign ALL relevant skills to each UI story (multiple skills encouraged)
+
 **Write to:** \`plans/$FEATURE_NAME/prd.json\`
 
 \`\`\`json
@@ -902,7 +920,7 @@ Parse User Stories from spec and create PRD JSON.
       \"id\": 1,
       \"title\": \"Story title\",
       \"category\": \"functional|ui|integration|edge-case|performance\",
-      \"skill\": \"frontend-design\",  // only for ui category
+      \"skills\": [\"emil-design-engineering\", \"web-animation-design\"],  // array for ui category
       \"steps\": [\"Step 1\", \"Step 2\", ...],
       \"passes\": false,
       \"priority\": 1
@@ -1368,20 +1386,47 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
         NEXT_ITERATION=$((ITERATION + 1))
         NEXT_STORY=$(jq ".stories[] | select(.id == $NEXT_STORY_ID)" "$PRD_PATH")
         NEXT_TITLE=$(echo "$NEXT_STORY" | jq -r '.title')
-        NEXT_SKILL=$(echo "$NEXT_STORY" | jq -r '.skill // empty')
         INCOMPLETE_COUNT=$(jq '[.stories[] | select(.passes == false)] | length' "$PRD_PATH")
 
-        # Build skill fields for next story
+        # Handle skills array (new) or skill string (backward compat)
+        NEXT_SKILLS_JSON=$(echo "$NEXT_STORY" | jq -r '.skills // empty')
+        NEXT_SKILL_LEGACY=$(echo "$NEXT_STORY" | jq -r '.skill // empty')
+
         SKILL_FRONTMATTER=""
         SKILL_SECTION=""
-        if [[ -n "$NEXT_SKILL" ]]; then
-          SKILL_FRONTMATTER="skill: \"$NEXT_SKILL\""
+        SKILLS_LOG=""
+
+        if [[ -n "$NEXT_SKILLS_JSON" ]] && [[ "$NEXT_SKILLS_JSON" != "null" ]]; then
+          # New format: skills array
+          SKILLS_LIST=$(echo "$NEXT_SKILLS_JSON" | jq -r '.[]' 2>/dev/null || echo "")
+          if [[ -n "$SKILLS_LIST" ]]; then
+            SKILL_FRONTMATTER="skills: $NEXT_SKILLS_JSON"
+            SKILLS_LOG=$(echo "$SKILLS_LIST" | tr '\n' ',' | sed 's/,$//')
+            SKILL_SECTION="## Required Skills
+
+This story requires the following skills. **BEFORE implementing**, load each:
+
+"
+            while IFS= read -r skill; do
+              [[ -n "$skill" ]] && SKILL_SECTION="${SKILL_SECTION}\`\`\`
+/Skill $skill
+\`\`\`
+
+"
+            done <<< "$SKILLS_LIST"
+            SKILL_SECTION="${SKILL_SECTION}Follow each skill's guidance for implementation patterns and quality standards.
+"
+          fi
+        elif [[ -n "$NEXT_SKILL_LEGACY" ]]; then
+          # Legacy format: single skill string
+          SKILL_FRONTMATTER="skill: \"$NEXT_SKILL_LEGACY\""
+          SKILLS_LOG="$NEXT_SKILL_LEGACY"
           SKILL_SECTION="## Required Skill
 
-This story requires the \`$NEXT_SKILL\` skill. **BEFORE implementing**, invoke:
+This story requires the \`$NEXT_SKILL_LEGACY\` skill. **BEFORE implementing**, invoke:
 
 \`\`\`
-/Skill $NEXT_SKILL
+/Skill $NEXT_SKILL_LEGACY
 \`\`\`
 
 Follow the skill's guidance for implementation approach, patterns, and quality standards.
@@ -1389,14 +1434,14 @@ Follow the skill's guidance for implementation approach, patterns, and quality s
         fi
 
         if [[ -f "$PROGRESS_PATH" ]]; then
-          if [[ -n "$NEXT_SKILL" ]]; then
-            echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$NEXT_STORY_ID,\"status\":\"STARTED\",\"skill\":\"$NEXT_SKILL\",\"notes\":\"Beginning story #$NEXT_STORY_ID (requires $NEXT_SKILL skill)\"}" >> "$PROGRESS_PATH"
+          if [[ -n "$SKILLS_LOG" ]]; then
+            echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$NEXT_STORY_ID,\"status\":\"STARTED\",\"skills\":\"$SKILLS_LOG\",\"notes\":\"Beginning story #$NEXT_STORY_ID (requires skills)\"}" >> "$PROGRESS_PATH"
           else
             echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$NEXT_STORY_ID,\"status\":\"STARTED\",\"notes\":\"Beginning story #$NEXT_STORY_ID\"}" >> "$PROGRESS_PATH"
           fi
         fi
 
-        # Build frontmatter (skill line only if present)
+        # Build frontmatter (skills line only if present)
         FRONTMATTER_CONTENT="---
 mode: \"prd\"
 active: true
