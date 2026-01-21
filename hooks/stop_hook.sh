@@ -1291,9 +1291,13 @@ $(generate_prd_phase_prompt "$CURRENT_PHASE")"
 
   # Update state file body with new prompt
   # Remove old body (everything after second ---) and append new
-  # Note: Using sed '$d' instead of 'head -n -1' for BSD/macOS compatibility
-  FRONTMATTER_CONTENT=$(sed -n '1,/^---$/p' "$STATE_FILE" | sed '$d')
-  FRONTMATTER_END=$(grep -n '^---$' "$STATE_FILE" | head -2 | tail -1 | cut -d: -f1)
+  # Use || true to handle edge case where file is corrupted between validation and here
+  FRONTMATTER_END=$(grep -n '^---$' "$STATE_FILE" 2>/dev/null | head -2 | tail -1 | cut -d: -f1 || true)
+  if [[ -z "$FRONTMATTER_END" ]] || [[ ! "$FRONTMATTER_END" =~ ^[0-9]+$ ]]; then
+    echo "⚠️  Loop (prd): State file corrupted (no closing ---)" >&2
+    rm "$STATE_FILE"
+    exit 0
+  fi
   HEAD_CONTENT=$(head -n "$FRONTMATTER_END" "$STATE_FILE")
   write_state_file "$STATE_FILE" "$HEAD_CONTENT
 
