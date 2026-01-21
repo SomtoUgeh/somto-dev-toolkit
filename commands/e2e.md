@@ -19,6 +19,42 @@ You are now in a Playwright E2E test development loop.
 
 Please work on the task. When you try to exit, the E2E test loop will feed the same PROMPT back to you for the next iteration. You'll see your previous work in files and git history, allowing you to iterate and improve.
 
+---
+
+## Structured Output Control Flow
+
+The stop hook parses your output for specific XML markers. **You MUST output the exact marker format** to advance. Missing markers block progression with guidance.
+
+### Required Markers (in order)
+
+| Step | Marker | When |
+|------|--------|------|
+| 1 | `<reviews_complete/>` | After running reviewers and addressing findings |
+| 2 | `<iteration_complete test_file="..."/>` | After committing test |
+| 3 | `<promise>TEXT</promise>` | When all flows covered (to exit loop) |
+
+### Exact Marker Formats
+
+```xml
+<!-- After running reviewers -->
+<reviews_complete/>
+
+<!-- After committing (include actual test file path) -->
+<iteration_complete test_file="e2e/checkout.e2e.ts"/>
+
+<!-- When all critical flows covered -->
+<promise>E2E COMPLETE</promise>
+```
+
+### Validation Rules
+
+1. **reviews marker required first** - Cannot advance without `<reviews_complete/>`
+2. **test_file attribute required** - Hook logs progress with this path
+3. **Commit must exist** - Pattern: `test(...):` in recent commits
+4. **Last marker wins** - If examples appear in docs, only LAST occurrence counts
+
+---
+
 ## Your Task
 
 Each iteration, you must:
@@ -32,7 +68,6 @@ Each iteration, you must:
 7. **[MANDATORY] Run Kieran review** - ALWAYS run based on what you changed (all max_turns: 20):
    - TypeScript/JavaScript: `compound-engineering:review:kieran-typescript-reviewer`
    - Python: `compound-engineering:review:kieran-python-reviewer`
-   - Rails/Ruby: `compound-engineering:review:kieran-rails-reviewer`
    - Database/migrations/data models: `compound-engineering:review:data-integrity-guardian`
 8. **[MANDATORY] Output reviews marker** after addressing all findings:
    ```

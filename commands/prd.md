@@ -15,79 +15,261 @@ Execute the setup script to initialize the PRD loop:
 "${CLAUDE_PLUGIN_ROOT}/scripts/setup-prd.sh" $ARGUMENTS
 ```
 
-You are now in a phased PRD workflow. The stop hook will advance you through phases based on structured output markers.
+You are now in a phased PRD workflow. The stop hook advances you through phases based on **structured output markers**.
 
-## Phases
+---
 
-| Phase | Name | Your Output | Next |
-|-------|------|-------------|------|
-| 1 | Input Classification | `<phase_complete phase="1" feature_name="NAME"/>` | 2 |
-| 2 | Interview (waves) | `<phase_complete phase="2" next="2.5"/>` or `next="3"` | 2.5 or 3 |
-| 2.5 | Research | `<phase_complete phase="2.5" next="2"/>` | 2 (continue) |
-| 3 | Spec Write | `<phase_complete phase="3" spec_path="..."/>` | 3.2 |
-| 3.2 | Skill Enrichment | `<phase_complete phase="3.2"/>` | 3.5 |
-| 3.5 | Review Gate | `<gate_decision>PROCEED</gate_decision>` | 4 |
-| 4 | PRD Gen | `<phase_complete phase="4" prd_path="..."/>` | 5 |
-| 5 | Progress File | `<phase_complete phase="5" progress_path="..."/>` | 5.5 |
-| 5.5 | Complexity | `<max_iterations>N</max_iterations>` | 6 |
-| 6 | Go Command | `<phase_complete phase="6"/>` | done |
+## Structured Output Control Flow
 
-## Your Task
+The hook parses your output for specific XML markers. **You MUST output the exact marker format** for your current phase to advance. Invalid or missing markers trigger retry with guidance.
 
-Read the state file (path shown in setup output) for your current phase prompt.
-Complete the phase task and output the appropriate marker.
+### Phase Transition Table
+
+| Phase | Name | Required Marker | Attributes | Next Phase |
+|-------|------|-----------------|------------|------------|
+| 1 | Input Classification | `<phase_complete phase="1"/>` | `feature_name` (required) | 2 |
+| 2 | Interview | `<phase_complete phase="2"/>` | `next` (required: "2.5" or "3") | 2.5 or 3 |
+| 2.5 | Research | `<phase_complete phase="2.5"/>` | `next` (required: "2") | 2 |
+| 3 | Spec Write | `<phase_complete phase="3"/>` | `spec_path` (required) | 3.2 |
+| 3.2 | Skill Enrichment | `<phase_complete phase="3.2"/>` | none | 3.5 |
+| 3.5 | Review Gate | `<gate_decision>` | PROCEED or BLOCK | 4 (if PROCEED) |
+| 4 | PRD Generation | `<phase_complete phase="4"/>` | `prd_path` (required) | 5 |
+| 5 | Progress File | `<phase_complete phase="5"/>` | `progress_path` (required) | 5.5 |
+| 5.5 | Complexity | `<max_iterations>` | integer N | 6 |
+| 6 | Go Command | `<phase_complete phase="6"/>` | none | done |
+
+### Marker Validation Rules
+
+1. **phase attribute must match current phase** - `<phase_complete phase="3"/>` when in phase 2 is ignored
+2. **Last marker wins** - If docs/examples contain markers, only the LAST occurrence counts
+3. **next attribute validated** - Phase 1→only 2, Phase 2→only 2.5 or 3, Phase 2.5→only 2
+4. **Retry on invalid** - Wrong marker increments `retry_count`, max 3 retries before asking for help
+
+### Exact Marker Formats
+
+```xml
+<!-- Phase 1 -->
+<phase_complete phase="1" feature_name="auth-feature"/>
+
+<!-- Phase 2 (after Wave 1, trigger research) -->
+<phase_complete phase="2" next="2.5"/>
+
+<!-- Phase 2 (after all waves, go to spec) -->
+<phase_complete phase="2" next="3"/>
+
+<!-- Phase 2.5 (return to interview) -->
+<phase_complete phase="2.5" next="2"/>
+
+<!-- Phase 3 -->
+<phase_complete phase="3" spec_path="plans/auth-feature/spec.md"/>
+
+<!-- Phase 3.2 -->
+<phase_complete phase="3.2"/>
+
+<!-- Phase 3.5 -->
+<gate_decision>PROCEED</gate_decision>
+<!-- or -->
+<gate_decision>BLOCK</gate_decision>
+
+<!-- Phase 4 -->
+<phase_complete phase="4" prd_path="plans/auth-feature/prd.json"/>
+
+<!-- Phase 5 -->
+<phase_complete phase="5" progress_path="plans/auth-feature/progress.txt"/>
+
+<!-- Phase 5.5 (MUST use agent's value, not guess) -->
+<max_iterations>25</max_iterations>
+
+<!-- Phase 6 -->
+<phase_complete phase="6"/>
+```
+
+---
 
 ## Phase Details
 
 ### Phase 1: Input Classification
-Classify the input (empty/file/folder/idea) and extract feature context.
+
+Classify input type (empty/file/folder/idea) and extract feature context.
+
+**Output:** `<phase_complete phase="1" feature_name="SLUG"/>` where SLUG is lowercase-hyphenated.
 
 ### Phase 2: Deep Interview
-Conduct thorough interview using AskUserQuestion. After Wave 1 (3-4 questions), trigger research phase with `next="2.5"`. After all waves complete (8-10+ questions), advance to spec with `next="3"`.
+
+Conduct thorough interview using AskUserQuestion. Interview in waves:
+
+- **Wave 1** (3-4 questions): Core problem, success criteria, MVP scope
+- **After Wave 1**: Output `<phase_complete phase="2" next="2.5"/>` to trigger research
+- **Waves 2-5** (after research): Technical, UX, edge cases, tradeoffs
+- **After 8-10+ questions**: Output `<phase_complete phase="2" next="3"/>` to advance to spec
 
 ### Phase 2.5: Research
-Spawn 3+ research agents IN PARALLEL (with max_turns):
-- somto-dev-toolkit:prd-codebase-researcher (max_turns: 30)
-- compound-engineering:research:git-history-analyzer (max_turns: 30)
-- somto-dev-toolkit:prd-external-researcher (max_turns: 15)
 
-**Optional: agent-browser** for UI/UX features or competitor analysis:
+Spawn ALL research agents IN PARALLEL (single message, multiple Task calls):
+
+```
+Task 1: subagent_type="somto-dev-toolkit:prd-codebase-researcher" (max_turns: 30)
+Task 2: subagent_type="compound-engineering:research:git-history-analyzer" (max_turns: 30)
+Task 3: subagent_type="somto-dev-toolkit:prd-external-researcher" (max_turns: 15)
+```
+
+**Optional: agent-browser** for UI/competitor analysis:
 ```bash
 agent-browser open https://competitor.com/feature
-agent-browser snapshot -i --json    # Get interactive elements with refs
+agent-browser snapshot -i --json
 agent-browser screenshot --full competitor.png
 ```
-Use when you need visual examples, competitor implementations, or live docs extraction.
+
+**Output:** `<phase_complete phase="2.5" next="2"/>` to return to interview with research context.
 
 ### Phase 3: Spec Write
-Synthesize interview + research into comprehensive spec at `plans/<feature>/spec.md`.
 
-### Phase 3.2: Skill Enrichment
-Discover relevant skills (dhh-rails-style, frontend-design, agent-native-architecture, etc.) and spawn sub-agents to extract implementation patterns. Add "Implementation Patterns" section to spec.
+Write comprehensive spec to `plans/<feature>/spec.md`. Include:
+- Overview, Problem Statement, Success Criteria
+- User Stories (As a X, I want Y, so that Z)
+- Functional/Non-Functional Requirements
+- Technical Design (Data Models, API Contracts, Implementation Notes)
+- Edge Cases, Open Questions, Out of Scope
+- Review Findings (populated in Phase 3.5)
 
-### Phase 3.5: Review Gate (Multi-Dimensional)
-Spawn 6-8 reviewers IN PARALLEL (all max_turns: 15-20):
+**Output:** `<phase_complete phase="3" spec_path="plans/<feature>/spec.md"/>`
 
-**Core (always run):**
-- spec-flow-analyzer, architecture-strategist, security-sentinel
-- performance-oracle, code-simplicity-reviewer, pattern-recognition-specialist
+### Phase 3.2: Skill Discovery & Enrichment
+
+Discover relevant skills and extract implementation patterns:
+
+1. Search for skills: `~/.claude/skills/**/*.md`, `.claude/skills/**/*.md`
+2. Match skills to spec technologies (UI→frontend-design, Rails→dhh-rails-style, etc.)
+3. Spawn sub-agents to extract patterns from each skill
+4. Add "Implementation Patterns" section to spec
+
+**Output:** `<phase_complete phase="3.2"/>`
+
+### Phase 3.5: Review Gate
+
+Spawn ALL reviewers IN PARALLEL (single message, multiple Task calls):
+
+**Core reviewers (always run):**
+```
+subagent_type="compound-engineering:workflow:spec-flow-analyzer" (max_turns: 20)
+subagent_type="compound-engineering:review:architecture-strategist" (max_turns: 20)
+subagent_type="compound-engineering:review:security-sentinel" (max_turns: 20)
+subagent_type="compound-engineering:review:performance-oracle" (max_turns: 20)
+subagent_type="compound-engineering:review:code-simplicity-reviewer" (max_turns: 15)
+subagent_type="compound-engineering:review:pattern-recognition-specialist" (max_turns: 20)
+```
 
 **Domain-specific (if applicable):**
-- data-integrity-guardian (data models), agent-native-reviewer (AI features)
+```
+subagent_type="compound-engineering:review:data-integrity-guardian" (data models)
+subagent_type="compound-engineering:review:agent-native-reviewer" (AI features)
+```
 
-Add findings to spec. Output `<gate_decision>PROCEED</gate_decision>` or `BLOCK`.
+Add critical findings to spec's "Review Findings" section.
 
-### Phase 4: PRD JSON
-Generate `plans/<feature>/prd.json` with atomic stories. Each story must be: single responsibility, independently testable, no partial state, cleanly revertible.
+**Output:** `<gate_decision>PROCEED</gate_decision>` or `<gate_decision>BLOCK</gate_decision>`
+
+If BLOCK, address issues then re-output PROCEED.
+
+### Phase 4: PRD JSON Generation
+
+Generate `plans/<feature>/prd.json` with atomic stories.
+
+**Story size rules (ENFORCE):**
+- Each story = ONE iteration (~15-30 min)
+- If >7 verification steps → too big, split
+- If >3 files touched → consider splitting
+- If "and" in title → probably 2 stories
+
+**prd.json schema:**
+```json
+{
+  "title": "feature-name",
+  "stories": [
+    {
+      "id": 1,
+      "title": "User can create account",
+      "category": "functional|ui|integration|edge-case|performance",
+      "skills": ["skill-name-1", "skill-name-2"],
+      "steps": ["Step 1", "Step 2", "..."],
+      "passes": false,
+      "priority": 1
+    }
+  ],
+  "created_at": "ISO8601",
+  "source_spec": "plans/<feature>/spec.md"
+}
+```
+
+**Fields:**
+- `id`: Stable reference for progress tracking
+- `category`: `functional`, `ui`, `integration`, `edge-case`, `performance`
+- `skills`: Array of skill names (required for `ui` category, optional otherwise)
+- `steps`: 3-7 explicit verification steps
+- `passes`: Starts `false`, set `true` when verified
+- `priority`: 1=first (riskier/foundational), higher=later (polish)
+
+**Output:** `<phase_complete phase="4" prd_path="plans/<feature>/prd.json"/>`
 
 ### Phase 5: Progress File
-Create `plans/<feature>/progress.txt` header.
 
-### Phase 5.5: Complexity
-**MANDATORY**: Spawn somto-dev-toolkit:prd-complexity-estimator (max_turns: 20) using Task tool. Do NOT skip. Do NOT guess values. Wait for agent, then output `<max_iterations>N</max_iterations>` with agent's value.
+Create `plans/<feature>/progress.txt`:
+
+```
+# Progress Log: <feature_name>
+# Each line: JSON object with ts, story_id, status, notes
+# Status values: STARTED, PASSED, FAILED, BLOCKED
+```
+
+The /go loop appends JSON lines:
+```json
+{"ts":"2026-01-21T12:30:00Z","story_id":1,"status":"STARTED","notes":"Beginning story #1"}
+{"ts":"2026-01-21T12:45:00Z","story_id":1,"status":"PASSED","notes":"Story #1 complete"}
+```
+
+**Output:** `<phase_complete phase="5" progress_path="plans/<feature>/progress.txt"/>`
+
+### Phase 5.5: Complexity Estimation
+
+**MANDATORY**: Spawn the complexity estimator agent. Do NOT skip. Do NOT guess values.
+
+```
+Task: subagent_type="somto-dev-toolkit:prd-complexity-estimator" (max_turns: 20)
+prompt: "Estimate complexity for this PRD. <prd_json>{read PRD}</prd_json> <spec_content>{read spec}</spec_content>"
+```
+
+Wait for agent to return, then output with agent's recommended value:
+
+**Output:** `<max_iterations>N</max_iterations>` where N is from the agent
 
 ### Phase 6: Go Command
-Copy go command to clipboard, ask user what to do next.
+
+1. Copy command to clipboard:
+```bash
+cmd='/go plans/<feature>/prd.json --max-iterations N'
+case "$(uname -s)" in
+  Darwin) echo "$cmd" | pbcopy ;;
+  Linux) echo "$cmd" | xclip -selection clipboard 2>/dev/null || echo "$cmd" | xsel --clipboard 2>/dev/null ;;
+  MINGW*|MSYS*|CYGWIN*) echo "$cmd" | clip.exe ;;
+esac
+```
+
+2. Use AskUserQuestion with options: "Run /go now", "Run /go --once", "Done"
+
+**Output:** `<phase_complete phase="6"/>`
+
+---
+
+## Error Recovery
+
+If you output an invalid marker:
+- Hook increments `retry_count` and records `last_error`
+- You get the same phase prompt with a note about the expected marker
+- After 3 retries, hook pauses for user intervention
+
+Check state file for `retry_count` and `last_error` if stuck.
+
+---
 
 ## Key Principles
 
@@ -97,8 +279,10 @@ Copy go command to clipboard, ask user what to do next.
 
 **Non-Obvious > Obvious** - Focus on edge cases, error states, tradeoffs.
 
-**Atomic Stories** - Each story = ONE thing, ONE iteration (~15-30 min). Must be independently testable and cleanly revertible. If "and" in title, split it.
+**Atomic Stories** - Each story = ONE thing, ONE iteration. Independently testable, cleanly revertible.
+
+---
 
 ## Cancellation
 
-To cancel: `/cancel-prd` or remove `.claude/prd-loop-*.local.md`
+To cancel: `/cancel-prd` or `rm .claude/prd-loop-*.local.md`

@@ -16,7 +16,9 @@
 #   - loop_type backfill (backward compat)
 #   - sed escaping (special characters)
 
-set -euo pipefail
+# Keep tests running after failures; we track status manually.
+set -u
+set -o pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -28,10 +30,56 @@ NC='\033[0m' # No Color
 TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
+TESTS_SKIPPED=0
+
+CLEANUP_DIRS=()
+
+require_cmd() {
+  local cmd="$1"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "Missing required command: $cmd" >&2
+    exit 1
+  fi
+}
+
+register_cleanup_dir() {
+  CLEANUP_DIRS+=("$1")
+}
+
+cleanup() {
+  local dir
+  for dir in "${CLEANUP_DIRS[@]}"; do
+    [[ -n "$dir" ]] && rm -rf "$dir"
+  done
+}
+
+trap cleanup EXIT
+
+mktemp_dir() {
+  local dir
+  dir=$(mktemp -d 2>/dev/null || mktemp -d -t stop_hook_test)
+  echo "$dir"
+}
+
+mktemp_file() {
+  local file
+  file=$(mktemp 2>/dev/null || mktemp -t stop_hook_test)
+  echo "$file"
+}
 
 # Source the functions we want to test (extract them first)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOOK_SCRIPT="$SCRIPT_DIR/stop_hook.sh"
+
+if [[ ! -f "$HOOK_SCRIPT" ]]; then
+  echo "stop_hook.sh not found at $HOOK_SCRIPT" >&2
+  exit 1
+fi
+
+require_cmd jq
+require_cmd awk
+require_cmd mktemp
+require_cmd git
 
 # =============================================================================
 # Test Framework
@@ -80,6 +128,13 @@ assert_not_empty() {
   fi
 }
 
+skip() {
+  local message="${1:-}"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
+  echo -e "  ${YELLOW}↷${NC} $message (skipped)"
+}
+
 assert_contains() {
   local haystack="$1"
   local needle="$2"
@@ -116,19 +171,31 @@ section() {
 
 extract_functions() {
   # Extract extract_regex function
-  sed -n '/^extract_regex()/,/^}/p' "$HOOK_SCRIPT"
+  sed -n '/^[[:space:]]*extract_regex()/,/^[[:space:]]*}$/p' "$HOOK_SCRIPT"
 
   # Extract extract_regex_last function
-  sed -n '/^extract_regex_last()/,/^}/p' "$HOOK_SCRIPT"
+  sed -n '/^[[:space:]]*extract_regex_last()/,/^[[:space:]]*}$/p' "$HOOK_SCRIPT"
+
+  # Extract extract_promise_last function
+  sed -n '/^[[:space:]]*extract_promise_last()/,/^[[:space:]]*}$/p' "$HOOK_SCRIPT"
 
   # Extract escape_sed_replacement function
-  sed -n '/^escape_sed_replacement()/,/^}/p' "$HOOK_SCRIPT"
+  sed -n '/^[[:space:]]*escape_sed_replacement()/,/^[[:space:]]*}$/p' "$HOOK_SCRIPT"
+
+  # Extract sed_inplace function
+  sed -n '/^[[:space:]]*sed_inplace()/,/^[[:space:]]*}$/p' "$HOOK_SCRIPT"
 
   # Extract get_field function
-  sed -n '/^get_field()/,/^}/p' "$HOOK_SCRIPT"
+  sed -n '/^[[:space:]]*get_field()/,/^[[:space:]]*}$/p' "$HOOK_SCRIPT"
+
+  # Extract is_valid_prd_phase function
+  sed -n '/^[[:space:]]*is_valid_prd_phase()/,/^[[:space:]]*}$/p' "$HOOK_SCRIPT"
 
   # Extract parse_frontmatter function
-  sed -n '/^parse_frontmatter()/,/^}/p' "$HOOK_SCRIPT"
+  sed -n '/^[[:space:]]*parse_frontmatter()/,/^[[:space:]]*}$/p' "$HOOK_SCRIPT"
+
+  # Extract validate_state_file function
+  sed -n '/^[[:space:]]*validate_state_file()/,/^[[:space:]]*}$/p' "$HOOK_SCRIPT"
 }
 
 # Source the extracted functions
@@ -210,6 +277,11 @@ assert_eq "<reviews_complete/>" "$result" "returns full match when no capture gr
 result=$(extract_regex_last 'first <reviews_complete/> second <reviews_complete/>' '<reviews_complete/>')
 assert_eq "<reviews_complete/>" "$result" "returns last full match"
 
+describe "extract_regex_last - empty input"
+
+result=$(extract_regex_last "" 'phase="([^"]+)"')
+assert_empty "$result" "handles empty input"
+
 # Gate decision examples
 result=$(extract_regex_last 'Example: <gate_decision>BLOCK</gate_decision> ... Actual: <gate_decision>PROCEED</gate_decision>' '<gate_decision>([^<]+)</gate_decision>')
 assert_eq "PROCEED" "$result" "gate_decision returns last value"
@@ -269,6 +341,10 @@ describe "extract_regex_last - backslash stress tests"
 result=$(extract_regex_last 'path="C:\\double"' 'path="([^"]+)"')
 assert_eq 'C:\\double' "$result" "double backslash in input preserved"
 
+# Long backslash chains (regression coverage for infinite loop)
+result=$(extract_regex_last 'path="C:\a\b\c\d\e\f\g\h"' 'path="([^"]+)"')
+assert_eq 'C:\a\b\c\d\e\f\g\h' "$result" "long backslash chain preserved"
+
 # Backslash before special chars (t, n) treated as literal
 result=$(extract_regex_last 'path="has\ttab"' 'path="([^"]+)"')
 assert_eq 'has\ttab' "$result" "backslash-t preserved as literal"
@@ -276,18 +352,10 @@ assert_eq 'has\ttab' "$result" "backslash-t preserved as literal"
 # =============================================================================
 section "ISSUE FIX: Promise Tag - Last Match Wins (v0.10.37)"
 # =============================================================================
-# PROBLEM: First <promise> tag was grabbed (non-greedy .*?)
-# FIX: Changed to greedy .* to grab LAST match
+# PROBLEM: First <promise> tag was grabbed (examples in docs)
+# FIX: Use extract_promise_last so the LAST tag wins (whitespace normalized)
 
 describe "Promise tag extraction - last match wins"
-
-# Simulate promise parsing (perl-like behavior)
-extract_last_promise() {
-  local text="$1"
-  # This mimics the fixed perl command: s/.*<promise>(.*?)<\/promise>.*/$1/s
-  # The greedy .* at the start ensures we get the LAST match
-  echo "$text" | perl -0777 -pe 's/.*<promise>(.*?)<\/promise>.*/$1/s; s/^\s+|\s+$//g; s/\s+/ /g' 2>/dev/null || echo ""
-}
 
 # Example in documentation followed by actual promise
 DOC_WITH_PROMISE='When complete, output:
@@ -297,22 +365,22 @@ DOC_WITH_PROMISE='When complete, output:
 
 All tests passing!
 <promise>TESTS_PASS</promise>'
-result=$(extract_last_promise "$DOC_WITH_PROMISE")
+result=$(extract_promise_last "$DOC_WITH_PROMISE")
 assert_eq "TESTS_PASS" "$result" "ignores promise in code block example"
 
 # Multiple promises - should get last
 MULTI_PROMISE='<promise>first</promise> middle <promise>second</promise> end <promise>final</promise>'
-result=$(extract_last_promise "$MULTI_PROMISE")
+result=$(extract_promise_last "$MULTI_PROMISE")
 assert_eq "final" "$result" "multiple promises - returns last"
 
 # Promise with whitespace
 WHITESPACE_PROMISE='text <promise>  spaced out  </promise> more'
-result=$(extract_last_promise "$WHITESPACE_PROMISE")
+result=$(extract_promise_last "$WHITESPACE_PROMISE")
 assert_eq "spaced out" "$result" "trims whitespace from promise"
 
 # Empty promise
 EMPTY_PROMISE='<promise></promise>'
-result=$(extract_last_promise "$EMPTY_PROMISE")
+result=$(extract_promise_last "$EMPTY_PROMISE")
 assert_empty "$result" "handles empty promise tag"
 
 # =============================================================================
@@ -411,6 +479,59 @@ result=$(get_field "$BOOL_FM" "active")
 assert_eq "true" "$result" "handles boolean true"
 result=$(get_field "$BOOL_FM" "enabled")
 assert_eq "false" "$result" "handles boolean false"
+
+# =============================================================================
+section "ISSUE FIX: loop_type Backfill and Validation"
+# =============================================================================
+
+describe "validate_state_file - backfill legacy state files"
+
+LEGACY_DIR=$(mktemp_dir)
+register_cleanup_dir "$LEGACY_DIR"
+
+LEGACY_STATE="$LEGACY_DIR/legacy.md"
+cat > "$LEGACY_STATE" << 'EOF'
+---
+mode: "generic"
+active: true
+iteration: 1
+max_iterations: 5
+completion_promise: "DONE"
+---
+# legacy body
+EOF
+
+LEGACY_FM=$(parse_frontmatter "$LEGACY_STATE")
+if validate_state_file "$LEGACY_FM" "go" "$LEGACY_STATE"; then
+  status="success"
+else
+  status="failed"
+fi
+assert_eq "success" "$status" "backfills missing loop_type"
+
+BACKFILLED_LOOP=$(sed -n 's/^loop_type: "\(.*\)"/\1/p' "$LEGACY_STATE" | head -1)
+assert_eq "go" "$BACKFILLED_LOOP" "loop_type inserted into legacy frontmatter"
+
+describe "validate_state_file - mismatch fails"
+
+MISMATCH_STATE="$LEGACY_DIR/mismatch.md"
+cat > "$MISMATCH_STATE" << 'EOF'
+---
+loop_type: "ut"
+active: true
+iteration: 1
+max_iterations: 5
+---
+# mismatch body
+EOF
+
+MISMATCH_FM=$(parse_frontmatter "$MISMATCH_STATE")
+if validate_state_file "$MISMATCH_FM" "go" "$MISMATCH_STATE"; then
+  status="success"
+else
+  status="failed"
+fi
+assert_eq "failed" "$status" "loop_type mismatch is rejected"
 
 # =============================================================================
 section "ISSUE FIX: JSON Input Validation (v0.10.37)"
@@ -625,8 +746,8 @@ section "ISSUE FIX: Missing --- Delimiter (v0.10.38)"
 describe "Frontmatter delimiter validation"
 
 # Create temp test files
-TEMP_DIR=$(mktemp -d)
-trap "rm -rf $TEMP_DIR" EXIT
+TEMP_DIR=$(mktemp_dir)
+register_cleanup_dir "$TEMP_DIR"
 
 # Valid frontmatter
 cat > "$TEMP_DIR/valid.md" << 'EOF'
@@ -694,6 +815,126 @@ EOF
 result=$(parse_frontmatter "$TEMP_DIR/late_start.md" 2>/dev/null) && status="success" || status="failed"
 assert_eq "failed" "$status" "frontmatter must start at line 1"
 
+# Integration helpers (stop_hook end-to-end)
+write_transcript() {
+  local file="$1"
+  local text="$2"
+  jq -c -n --arg text "$text" \
+    '{role:"assistant",message:{content:[{type:"text",text:$text}]}}' > "$file"
+}
+
+build_hook_input() {
+  local session_id="$1"
+  local transcript_path="$2"
+  local cwd="$3"
+  jq -n \
+    --arg session_id "$session_id" \
+    --arg transcript_path "$transcript_path" \
+    --arg cwd "$cwd" \
+    '{session_id:$session_id, transcript_path:$transcript_path, cwd:$cwd, stop_hook_active:false}'
+}
+
+run_hook() {
+  local input="$1"
+  local workdir="$2"
+  local err_file
+  err_file=$(mktemp_file)
+  register_cleanup_dir "$err_file"
+  HOOK_OUTPUT=$(cd "$workdir" && printf '%s' "$input" | bash "$HOOK_SCRIPT" 2> "$err_file")
+  HOOK_STATUS=$?
+  HOOK_STDERR=$(cat "$err_file")
+}
+
+init_git_repo() {
+  local dir="$1"
+  git -C "$dir" init -q
+  git -C "$dir" config user.email "test@example.com"
+  git -C "$dir" config user.name "Test User"
+}
+
+git_commit_file() {
+  local dir="$1"
+  local message="$2"
+  local file="$3"
+  local content="$4"
+  printf '%s\n' "$content" > "$dir/$file"
+  git -C "$dir" add "$file"
+  git -C "$dir" commit -q -m "$message"
+}
+
+write_go_prd_state() {
+  local state_file="$1"
+  local prd_path="$2"
+  local spec_path="$3"
+  local feature_name="$4"
+  local current_story_id="$5"
+  local total_stories="$6"
+  local iteration="$7"
+  cat > "$state_file" << EOF
+---
+loop_type: "go"
+mode: "prd"
+active: true
+prd_path: "$prd_path"
+spec_path: "$spec_path"
+progress_path: ""
+feature_name: "$feature_name"
+current_story_id: $current_story_id
+total_stories: $total_stories
+iteration: $iteration
+max_iterations: 10
+started_at: "2024-01-01T00:00:00Z"
+---
+# go Loop
+EOF
+}
+
+write_loop_state() {
+  local state_file="$1"
+  local loop_type="$2"
+  local iteration="$3"
+  cat > "$state_file" << EOF
+---
+loop_type: "$loop_type"
+active: true
+iteration: $iteration
+max_iterations: 5
+completion_promise: "DONE"
+progress_path: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# $loop_type Loop
+EOF
+}
+
+write_prd_two_stories() {
+  local prd_path="$1"
+  local pass1="$2"
+  local pass2="$3"
+  cat > "$prd_path" << EOF
+{
+  "title": "Feature",
+  "stories": [
+    { "id": 1, "title": "Story One", "passes": $pass1, "priority": 1 },
+    { "id": 2, "title": "Story Two", "passes": $pass2, "priority": 2 }
+  ]
+}
+EOF
+}
+
+write_prd_single_story() {
+  local prd_path="$1"
+  local pass1="$2"
+  cat > "$prd_path" << EOF
+{
+  "title": "Feature",
+  "stories": [
+    { "id": 1, "title": "Story One", "passes": $pass1, "priority": 1 }
+  ]
+}
+EOF
+}
+
 # =============================================================================
 section "INTEGRATION: Real-World Marker Scenarios"
 # =============================================================================
@@ -742,6 +983,640 @@ result=$(extract_regex_last "$STORY_OUTPUT" '<reviews_complete/>')
 assert_eq "<reviews_complete/>" "$result" "finds reviews_complete marker"
 
 # =============================================================================
+section "INTEGRATION: stop_hook End-to-End"
+# =============================================================================
+
+describe "Legacy PRD state backfill (no loop_type)"
+
+PROJECT_DIR=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR"
+mkdir -p "$PROJECT_DIR/.claude"
+
+SESSION_ID="legacy123"
+STATE_FILE="$PROJECT_DIR/.claude/prd-loop-${SESSION_ID}.local.md"
+cat > "$STATE_FILE" << 'EOF'
+---
+mode: "prd"
+active: true
+feature_name: "feature-x"
+current_phase: "1"
+input_type: "idea"
+input_path: ""
+input_raw: "Build feature x"
+spec_path: ""
+prd_path: ""
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+TRANSCRIPT="$PROJECT_DIR/transcript.jsonl"
+write_transcript "$TRANSCRIPT" "No markers yet."
+
+HOOK_INPUT=$(build_hook_input "$SESSION_ID" "$TRANSCRIPT" "$PROJECT_DIR")
+run_hook "$HOOK_INPUT" "$PROJECT_DIR"
+
+assert_eq "0" "$HOOK_STATUS" "hook exits cleanly for active PRD loop"
+assert_contains "$HOOK_OUTPUT" '"decision": "block"' "hook blocks exit for active PRD loop"
+BACKFILLED_LOOP=$(sed -n 's/^loop_type: "\(.*\)"/\1/p' "$STATE_FILE" | head -1)
+assert_eq "prd" "$BACKFILLED_LOOP" "loop_type backfilled in state file"
+
+describe "PRD phase 3 with Windows spec_path"
+
+PROJECT_DIR2=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2"
+mkdir -p "$PROJECT_DIR2/.claude"
+
+SESSION_ID2="winpath123"
+STATE_FILE2="$PROJECT_DIR2/.claude/prd-loop-${SESSION_ID2}.local.md"
+cat > "$STATE_FILE2" << 'EOF'
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "auth"
+current_phase: "3"
+input_type: "idea"
+input_path: ""
+input_raw: "Auth"
+spec_path: ""
+prd_path: ""
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+WIN_MARKER='<phase_complete phase="3" spec_path="C:\Users\Dev\spec.md"/>'
+TRANSCRIPT2="$PROJECT_DIR2/transcript.jsonl"
+write_transcript "$TRANSCRIPT2" "$WIN_MARKER"
+
+HOOK_INPUT2=$(build_hook_input "$SESSION_ID2" "$TRANSCRIPT2" "$PROJECT_DIR2")
+run_hook "$HOOK_INPUT2" "$PROJECT_DIR2"
+
+assert_eq "0" "$HOOK_STATUS" "hook exits cleanly with Windows spec_path"
+PHASE_UPDATED=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2" | head -1)
+assert_eq "3.2" "$PHASE_UPDATED" "phase advances to 3.2"
+SPEC_UPDATED=$(sed -n 's/^spec_path: "\(.*\)"/\1/p' "$STATE_FILE2" | head -1)
+assert_eq 'C:\Users\Dev\spec.md' "$SPEC_UPDATED" "spec_path preserved with backslashes"
+
+describe "Promise extraction uses last match"
+
+PROJECT_DIR3=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR3"
+mkdir -p "$PROJECT_DIR3/.claude"
+
+SESSION_ID3="promise123"
+STATE_FILE3="$PROJECT_DIR3/.claude/go-loop-${SESSION_ID3}.local.md"
+cat > "$STATE_FILE3" << 'EOF'
+---
+loop_type: "go"
+mode: "generic"
+active: true
+once: false
+iteration: 1
+max_iterations: 5
+completion_promise: "TESTS_PASS"
+progress_path: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# go Loop
+EOF
+
+PROMISE_OUTPUT='Example:
+<promise>DONE</promise>
+
+All tests passing:
+<promise>TESTS_PASS</promise>'
+TRANSCRIPT3="$PROJECT_DIR3/transcript.jsonl"
+write_transcript "$TRANSCRIPT3" "$PROMISE_OUTPUT"
+
+HOOK_INPUT3=$(build_hook_input "$SESSION_ID3" "$TRANSCRIPT3" "$PROJECT_DIR3")
+run_hook "$HOOK_INPUT3" "$PROJECT_DIR3"
+
+if [[ -f "$STATE_FILE3" ]]; then
+  status="exists"
+else
+  status="missing"
+fi
+assert_eq "missing" "$status" "state file removed on promise completion"
+
+# =============================================================================
+section "INTEGRATION: PRD next-phase validation"
+# =============================================================================
+
+describe "Invalid next phase blocks and records error"
+
+PROJECT_DIR4=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR4"
+mkdir -p "$PROJECT_DIR4/.claude"
+
+SESSION_ID4="badnext123"
+STATE_FILE4="$PROJECT_DIR4/.claude/prd-loop-${SESSION_ID4}.local.md"
+cat > "$STATE_FILE4" << 'EOF'
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-y"
+current_phase: "1"
+input_type: "idea"
+input_path: ""
+input_raw: "Feature y"
+spec_path: ""
+prd_path: ""
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+BAD_NEXT_OUTPUT='<phase_complete phase="1" next="7"/>'
+TRANSCRIPT4="$PROJECT_DIR4/transcript.jsonl"
+write_transcript "$TRANSCRIPT4" "$BAD_NEXT_OUTPUT"
+
+HOOK_INPUT4=$(build_hook_input "$SESSION_ID4" "$TRANSCRIPT4" "$PROJECT_DIR4")
+run_hook "$HOOK_INPUT4" "$PROJECT_DIR4"
+
+assert_eq "0" "$HOOK_STATUS" "hook exits cleanly for invalid next phase"
+assert_contains "$HOOK_OUTPUT" '"decision": "block"' "hook blocks on invalid next phase"
+PHASE_STILL=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE4" | head -1)
+assert_eq "1" "$PHASE_STILL" "phase remains unchanged on invalid next"
+RETRY_COUNT_UPDATED=$(sed -n 's/^retry_count: \(.*\)/\1/p' "$STATE_FILE4" | head -1)
+assert_eq "1" "$RETRY_COUNT_UPDATED" "retry_count increments on invalid next"
+LAST_ERROR_UPDATED=$(sed -n 's/^last_error: "\(.*\)"/\1/p' "$STATE_FILE4" | head -1)
+assert_contains "$LAST_ERROR_UPDATED" "Invalid next phase '7'" "last_error records invalid next phase"
+
+# =============================================================================
+section "INTEGRATION: Transcript parsing resilience"
+# =============================================================================
+
+describe "Invalid transcript JSON does not crash hook"
+
+PROJECT_DIR5=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR5"
+mkdir -p "$PROJECT_DIR5/.claude"
+
+SESSION_ID5="badjson123"
+STATE_FILE5="$PROJECT_DIR5/.claude/go-loop-${SESSION_ID5}.local.md"
+cat > "$STATE_FILE5" << 'EOF'
+---
+loop_type: "go"
+mode: "generic"
+active: true
+once: false
+iteration: 1
+max_iterations: 5
+completion_promise: "DONE"
+progress_path: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# go Loop
+EOF
+
+TRANSCRIPT5="$PROJECT_DIR5/transcript.jsonl"
+# Intentionally malformed JSON (missing closing brace) to test parsing failure.
+cat > "$TRANSCRIPT5" << 'EOF'
+{ "role": "assistant", "message": { "content": [ { "type": "text", "text": "hi" } ] }
+EOF
+
+HOOK_INPUT5=$(build_hook_input "$SESSION_ID5" "$TRANSCRIPT5" "$PROJECT_DIR5")
+run_hook "$HOOK_INPUT5" "$PROJECT_DIR5"
+
+assert_eq "0" "$HOOK_STATUS" "hook exits cleanly on invalid transcript JSON"
+assert_contains "$HOOK_OUTPUT" '"decision": "block"' "hook blocks and continues loop"
+assert_contains "$HOOK_STDERR" "Failed to parse assistant message JSON" "stderr includes parse warning"
+[[ -f "$STATE_FILE5" ]] && state_status="exists" || state_status="missing"
+assert_eq "exists" "$state_status" "state file remains after parse failure"
+
+describe "Transcript with spaced role is parsed"
+
+PROJECT_DIR6=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR6"
+mkdir -p "$PROJECT_DIR6/.claude"
+
+SESSION_ID6="spacedrole123"
+STATE_FILE6="$PROJECT_DIR6/.claude/go-loop-${SESSION_ID6}.local.md"
+cat > "$STATE_FILE6" << 'EOF'
+---
+loop_type: "go"
+mode: "generic"
+active: true
+once: false
+iteration: 1
+max_iterations: 5
+completion_promise: "DONE"
+progress_path: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# go Loop
+EOF
+
+TRANSCRIPT6="$PROJECT_DIR6/transcript.jsonl"
+cat > "$TRANSCRIPT6" << 'EOF'
+{ "role": "assistant", "message": { "content": [ { "type": "text", "text": "<promise>DONE</promise>" } ] } }
+EOF
+
+HOOK_INPUT6=$(build_hook_input "$SESSION_ID6" "$TRANSCRIPT6" "$PROJECT_DIR6")
+run_hook "$HOOK_INPUT6" "$PROJECT_DIR6"
+
+[[ -f "$STATE_FILE6" ]] && state_status="exists" || state_status="missing"
+assert_eq "missing" "$state_status" "promise completes even with spaced role"
+
+# =============================================================================
+section "INTEGRATION: go/prd PRD file validation"
+# =============================================================================
+
+describe "Missing prd.json blocks go/prd loop"
+
+PROJECT_DIR7=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR7"
+mkdir -p "$PROJECT_DIR7/.claude"
+
+SESSION_ID7="missingprd123"
+STATE_FILE7="$PROJECT_DIR7/.claude/go-loop-${SESSION_ID7}.local.md"
+cat > "$STATE_FILE7" << EOF
+---
+loop_type: "go"
+mode: "prd"
+active: true
+prd_path: "$PROJECT_DIR7/plans/missing-prd.json"
+spec_path: "$PROJECT_DIR7/plans/spec.md"
+progress_path: ""
+feature_name: "feature-z"
+current_story_id: 1
+total_stories: 1
+iteration: 1
+max_iterations: 5
+started_at: "2024-01-01T00:00:00Z"
+---
+# go Loop
+EOF
+
+TRANSCRIPT7="$PROJECT_DIR7/transcript.jsonl"
+write_transcript "$TRANSCRIPT7" "No markers yet."
+
+HOOK_INPUT7=$(build_hook_input "$SESSION_ID7" "$TRANSCRIPT7" "$PROJECT_DIR7")
+run_hook "$HOOK_INPUT7" "$PROJECT_DIR7"
+
+assert_contains "$HOOK_OUTPUT" "PRD file not found" "missing prd.json blocks loop"
+[[ -f "$STATE_FILE7" ]] && state_status="exists" || state_status="missing"
+assert_eq "exists" "$state_status" "state file remains when prd.json missing"
+
+describe "Invalid prd.json blocks go/prd loop"
+
+PROJECT_DIR8=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR8"
+mkdir -p "$PROJECT_DIR8/.claude" "$PROJECT_DIR8/plans"
+
+SESSION_ID8="invalidprd123"
+STATE_FILE8="$PROJECT_DIR8/.claude/go-loop-${SESSION_ID8}.local.md"
+cat > "$STATE_FILE8" << EOF
+---
+loop_type: "go"
+mode: "prd"
+active: true
+prd_path: "$PROJECT_DIR8/plans/prd.json"
+spec_path: "$PROJECT_DIR8/plans/spec.md"
+progress_path: ""
+feature_name: "feature-w"
+current_story_id: 1
+total_stories: 1
+iteration: 1
+max_iterations: 5
+started_at: "2024-01-01T00:00:00Z"
+---
+# go Loop
+EOF
+
+cat > "$PROJECT_DIR8/plans/prd.json" << 'EOF'
+{ "invalid": true
+EOF
+
+TRANSCRIPT8="$PROJECT_DIR8/transcript.jsonl"
+write_transcript "$TRANSCRIPT8" "No markers yet."
+
+HOOK_INPUT8=$(build_hook_input "$SESSION_ID8" "$TRANSCRIPT8" "$PROJECT_DIR8")
+run_hook "$HOOK_INPUT8" "$PROJECT_DIR8"
+
+assert_contains "$HOOK_OUTPUT" "PRD file is invalid JSON" "invalid prd.json blocks loop"
+[[ -f "$STATE_FILE8" ]] && state_status="exists" || state_status="missing"
+assert_eq "exists" "$state_status" "state file remains when prd.json invalid"
+
+# =============================================================================
+section "INTEGRATION: go/prd Story Gating"
+# =============================================================================
+
+describe "Story not passing blocks"
+
+PROJECT_DIR9=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR9"
+mkdir -p "$PROJECT_DIR9/.claude" "$PROJECT_DIR9/plans"
+
+SESSION_ID9="storypass123"
+STATE_FILE9="$PROJECT_DIR9/.claude/go-loop-${SESSION_ID9}.local.md"
+write_go_prd_state "$STATE_FILE9" "$PROJECT_DIR9/plans/prd.json" "$PROJECT_DIR9/plans/spec.md" "feature-a" 1 2 1
+write_prd_two_stories "$PROJECT_DIR9/plans/prd.json" "false" "false"
+
+TRANSCRIPT9="$PROJECT_DIR9/transcript.jsonl"
+write_transcript "$TRANSCRIPT9" "No markers yet."
+
+HOOK_INPUT9=$(build_hook_input "$SESSION_ID9" "$TRANSCRIPT9" "$PROJECT_DIR9")
+run_hook "$HOOK_INPUT9" "$PROJECT_DIR9"
+
+assert_contains "$HOOK_OUTPUT" "not yet passing" "blocks when story not passing"
+
+describe "Passing story without reviews blocks"
+
+PROJECT_DIR10=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR10"
+mkdir -p "$PROJECT_DIR10/.claude" "$PROJECT_DIR10/plans"
+
+SESSION_ID10="noreviews123"
+STATE_FILE10="$PROJECT_DIR10/.claude/go-loop-${SESSION_ID10}.local.md"
+write_go_prd_state "$STATE_FILE10" "$PROJECT_DIR10/plans/prd.json" "$PROJECT_DIR10/plans/spec.md" "feature-b" 1 2 1
+write_prd_two_stories "$PROJECT_DIR10/plans/prd.json" "true" "false"
+
+TRANSCRIPT10="$PROJECT_DIR10/transcript.jsonl"
+write_transcript "$TRANSCRIPT10" "No markers yet."
+
+HOOK_INPUT10=$(build_hook_input "$SESSION_ID10" "$TRANSCRIPT10" "$PROJECT_DIR10")
+run_hook "$HOOK_INPUT10" "$PROJECT_DIR10"
+
+assert_contains "$HOOK_OUTPUT" "REVIEWS NOT run" "blocks when reviews missing"
+
+describe "Reviews complete but no story_complete blocks"
+
+PROJECT_DIR11=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR11"
+mkdir -p "$PROJECT_DIR11/.claude" "$PROJECT_DIR11/plans"
+
+SESSION_ID11="nostorymarker123"
+STATE_FILE11="$PROJECT_DIR11/.claude/go-loop-${SESSION_ID11}.local.md"
+write_go_prd_state "$STATE_FILE11" "$PROJECT_DIR11/plans/prd.json" "$PROJECT_DIR11/plans/spec.md" "feature-c" 1 2 1
+write_prd_two_stories "$PROJECT_DIR11/plans/prd.json" "true" "false"
+
+TRANSCRIPT11="$PROJECT_DIR11/transcript.jsonl"
+write_transcript "$TRANSCRIPT11" "<reviews_complete/>"
+
+HOOK_INPUT11=$(build_hook_input "$SESSION_ID11" "$TRANSCRIPT11" "$PROJECT_DIR11")
+run_hook "$HOOK_INPUT11" "$PROJECT_DIR11"
+
+assert_contains "$HOOK_OUTPUT" "Now commit and output" "blocks until story_complete marker"
+
+describe "Story id mismatch blocks"
+
+PROJECT_DIR12=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR12"
+mkdir -p "$PROJECT_DIR12/.claude" "$PROJECT_DIR12/plans"
+
+SESSION_ID12="mismatch123"
+STATE_FILE12="$PROJECT_DIR12/.claude/go-loop-${SESSION_ID12}.local.md"
+write_go_prd_state "$STATE_FILE12" "$PROJECT_DIR12/plans/prd.json" "$PROJECT_DIR12/plans/spec.md" "feature-d" 1 2 1
+write_prd_two_stories "$PROJECT_DIR12/plans/prd.json" "true" "false"
+
+TRANSCRIPT12="$PROJECT_DIR12/transcript.jsonl"
+write_transcript "$TRANSCRIPT12" "<reviews_complete/>\n<story_complete story_id=\"2\"/>"
+
+HOOK_INPUT12=$(build_hook_input "$SESSION_ID12" "$TRANSCRIPT12" "$PROJECT_DIR12")
+run_hook "$HOOK_INPUT12" "$PROJECT_DIR12"
+
+assert_contains "$HOOK_OUTPUT" "story_id mismatch" "blocks on story_id mismatch"
+
+describe "story_complete with passes false blocks"
+
+PROJECT_DIR13=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR13"
+mkdir -p "$PROJECT_DIR13/.claude" "$PROJECT_DIR13/plans"
+
+SESSION_ID13="passesfalse123"
+STATE_FILE13="$PROJECT_DIR13/.claude/go-loop-${SESSION_ID13}.local.md"
+write_go_prd_state "$STATE_FILE13" "$PROJECT_DIR13/plans/prd.json" "$PROJECT_DIR13/plans/spec.md" "feature-e" 1 2 1
+write_prd_two_stories "$PROJECT_DIR13/plans/prd.json" "false" "false"
+
+TRANSCRIPT13="$PROJECT_DIR13/transcript.jsonl"
+write_transcript "$TRANSCRIPT13" "<reviews_complete/>\n<story_complete story_id=\"1\"/>"
+
+HOOK_INPUT13=$(build_hook_input "$SESSION_ID13" "$TRANSCRIPT13" "$PROJECT_DIR13")
+run_hook "$HOOK_INPUT13" "$PROJECT_DIR13"
+
+assert_contains "$HOOK_OUTPUT" "passes: false" "blocks when prd.json not updated"
+
+describe "story_complete without reviews blocks"
+
+PROJECT_DIR14=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR14"
+mkdir -p "$PROJECT_DIR14/.claude" "$PROJECT_DIR14/plans"
+
+SESSION_ID14="missingreviews123"
+STATE_FILE14="$PROJECT_DIR14/.claude/go-loop-${SESSION_ID14}.local.md"
+write_go_prd_state "$STATE_FILE14" "$PROJECT_DIR14/plans/prd.json" "$PROJECT_DIR14/plans/spec.md" "feature-f" 1 2 1
+write_prd_two_stories "$PROJECT_DIR14/plans/prd.json" "true" "false"
+
+TRANSCRIPT14="$PROJECT_DIR14/transcript.jsonl"
+write_transcript "$TRANSCRIPT14" "<story_complete story_id=\"1\"/>"
+
+HOOK_INPUT14=$(build_hook_input "$SESSION_ID14" "$TRANSCRIPT14" "$PROJECT_DIR14")
+run_hook "$HOOK_INPUT14" "$PROJECT_DIR14"
+
+assert_contains "$HOOK_OUTPUT" "reviews_complete" "blocks when reviews marker missing"
+
+describe "Missing commit blocks and increments iteration"
+
+PROJECT_DIR15=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR15"
+mkdir -p "$PROJECT_DIR15/.claude" "$PROJECT_DIR15/plans"
+init_git_repo "$PROJECT_DIR15"
+git_commit_file "$PROJECT_DIR15" "chore: init" "README.md" "init"
+
+SESSION_ID15="nocommit123"
+STATE_FILE15="$PROJECT_DIR15/.claude/go-loop-${SESSION_ID15}.local.md"
+write_go_prd_state "$STATE_FILE15" "$PROJECT_DIR15/plans/prd.json" "$PROJECT_DIR15/plans/spec.md" "feature-g" 1 2 1
+write_prd_two_stories "$PROJECT_DIR15/plans/prd.json" "true" "false"
+
+TRANSCRIPT15="$PROJECT_DIR15/transcript.jsonl"
+write_transcript "$TRANSCRIPT15" "<reviews_complete/>\n<story_complete story_id=\"1\"/>"
+
+HOOK_INPUT15=$(build_hook_input "$SESSION_ID15" "$TRANSCRIPT15" "$PROJECT_DIR15")
+run_hook "$HOOK_INPUT15" "$PROJECT_DIR15"
+
+assert_contains "$HOOK_OUTPUT" "NO COMMIT found" "blocks when commit missing"
+ITER_UPDATED=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE15" | head -1)
+assert_eq "2" "$ITER_UPDATED" "iteration increments when commit missing"
+
+describe "Commit advances to next story"
+
+PROJECT_DIR16=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR16"
+mkdir -p "$PROJECT_DIR16/.claude" "$PROJECT_DIR16/plans"
+init_git_repo "$PROJECT_DIR16"
+git_commit_file "$PROJECT_DIR16" "feat(feature-h): story #1 - done" "README.md" "done"
+
+SESSION_ID16="advance123"
+STATE_FILE16="$PROJECT_DIR16/.claude/go-loop-${SESSION_ID16}.local.md"
+write_go_prd_state "$STATE_FILE16" "$PROJECT_DIR16/plans/prd.json" "$PROJECT_DIR16/plans/spec.md" "feature-h" 1 2 1
+write_prd_two_stories "$PROJECT_DIR16/plans/prd.json" "true" "false"
+
+TRANSCRIPT16="$PROJECT_DIR16/transcript.jsonl"
+write_transcript "$TRANSCRIPT16" "<reviews_complete/>\n<story_complete story_id=\"1\"/>"
+
+HOOK_INPUT16=$(build_hook_input "$SESSION_ID16" "$TRANSCRIPT16" "$PROJECT_DIR16")
+run_hook "$HOOK_INPUT16" "$PROJECT_DIR16"
+
+NEXT_ID=$(sed -n 's/^current_story_id: \(.*\)/\1/p' "$STATE_FILE16" | head -1)
+assert_eq "2" "$NEXT_ID" "advances to next story"
+NEXT_ITER=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE16" | head -1)
+assert_eq "2" "$NEXT_ITER" "iteration increments on advance"
+assert_contains "$HOOK_OUTPUT" "Story #1 complete! Now on story #2" "output announces next story"
+
+describe "All stories complete removes state file"
+
+PROJECT_DIR17=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR17"
+mkdir -p "$PROJECT_DIR17/.claude" "$PROJECT_DIR17/plans"
+init_git_repo "$PROJECT_DIR17"
+git_commit_file "$PROJECT_DIR17" "feat(feature-i): story #1 - done" "README.md" "done"
+
+SESSION_ID17="complete123"
+STATE_FILE17="$PROJECT_DIR17/.claude/go-loop-${SESSION_ID17}.local.md"
+write_go_prd_state "$STATE_FILE17" "$PROJECT_DIR17/plans/prd.json" "$PROJECT_DIR17/plans/spec.md" "feature-i" 1 1 1
+write_prd_single_story "$PROJECT_DIR17/plans/prd.json" "true"
+
+TRANSCRIPT17="$PROJECT_DIR17/transcript.jsonl"
+write_transcript "$TRANSCRIPT17" "<reviews_complete/>\n<story_complete story_id=\"1\"/>"
+
+HOOK_INPUT17=$(build_hook_input "$SESSION_ID17" "$TRANSCRIPT17" "$PROJECT_DIR17")
+run_hook "$HOOK_INPUT17" "$PROJECT_DIR17"
+
+[[ -f "$STATE_FILE17" ]] && state_status="exists" || state_status="missing"
+assert_eq "missing" "$state_status" "state file removed when all stories complete"
+
+# =============================================================================
+section "INTEGRATION: ut/e2e Gating"
+# =============================================================================
+
+describe "UT reviews missing blocks"
+
+PROJECT_DIR18=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR18"
+mkdir -p "$PROJECT_DIR18/.claude"
+
+SESSION_ID18="utreviews123"
+STATE_FILE18="$PROJECT_DIR18/.claude/ut-loop-${SESSION_ID18}.local.md"
+write_loop_state "$STATE_FILE18" "ut" 1
+
+TRANSCRIPT18="$PROJECT_DIR18/transcript.jsonl"
+write_transcript "$TRANSCRIPT18" "No markers yet."
+
+HOOK_INPUT18=$(build_hook_input "$SESSION_ID18" "$TRANSCRIPT18" "$PROJECT_DIR18")
+run_hook "$HOOK_INPUT18" "$PROJECT_DIR18"
+
+assert_contains "$HOOK_OUTPUT" "Reviews NOT run" "blocks when UT reviews missing"
+
+describe "UT reviews complete but iteration missing blocks"
+
+PROJECT_DIR19=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR19"
+mkdir -p "$PROJECT_DIR19/.claude"
+
+SESSION_ID19="utiter123"
+STATE_FILE19="$PROJECT_DIR19/.claude/ut-loop-${SESSION_ID19}.local.md"
+write_loop_state "$STATE_FILE19" "ut" 1
+
+TRANSCRIPT19="$PROJECT_DIR19/transcript.jsonl"
+write_transcript "$TRANSCRIPT19" "<reviews_complete/>"
+
+HOOK_INPUT19=$(build_hook_input "$SESSION_ID19" "$TRANSCRIPT19" "$PROJECT_DIR19")
+run_hook "$HOOK_INPUT19" "$PROJECT_DIR19"
+
+assert_contains "$HOOK_OUTPUT" "iteration incomplete" "blocks when iteration marker missing"
+
+describe "UT markers without test commit blocks"
+
+PROJECT_DIR20=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR20"
+mkdir -p "$PROJECT_DIR20/.claude"
+init_git_repo "$PROJECT_DIR20"
+git_commit_file "$PROJECT_DIR20" "chore: init" "README.md" "init"
+
+SESSION_ID20="utnocommit123"
+STATE_FILE20="$PROJECT_DIR20/.claude/ut-loop-${SESSION_ID20}.local.md"
+write_loop_state "$STATE_FILE20" "ut" 1
+
+TRANSCRIPT20="$PROJECT_DIR20/transcript.jsonl"
+write_transcript "$TRANSCRIPT20" "<reviews_complete/>\n<iteration_complete test_file=\"tests/unit.spec.ts\"/>"
+
+HOOK_INPUT20=$(build_hook_input "$SESSION_ID20" "$TRANSCRIPT20" "$PROJECT_DIR20")
+run_hook "$HOOK_INPUT20" "$PROJECT_DIR20"
+
+assert_contains "$HOOK_OUTPUT" "NO COMMIT found" "blocks when test commit missing"
+ITER_UT=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE20" | head -1)
+assert_eq "1" "$ITER_UT" "iteration remains when UT commit missing"
+
+describe "UT with test commit advances iteration"
+
+PROJECT_DIR21=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR21"
+mkdir -p "$PROJECT_DIR21/.claude"
+init_git_repo "$PROJECT_DIR21"
+git_commit_file "$PROJECT_DIR21" "test: add coverage" "README.md" "tests"
+
+SESSION_ID21="utcommit123"
+STATE_FILE21="$PROJECT_DIR21/.claude/ut-loop-${SESSION_ID21}.local.md"
+write_loop_state "$STATE_FILE21" "ut" 1
+
+TRANSCRIPT21="$PROJECT_DIR21/transcript.jsonl"
+write_transcript "$TRANSCRIPT21" "<reviews_complete/>\n<iteration_complete test_file=\"tests/unit.spec.ts\"/>"
+
+HOOK_INPUT21=$(build_hook_input "$SESSION_ID21" "$TRANSCRIPT21" "$PROJECT_DIR21")
+run_hook "$HOOK_INPUT21" "$PROJECT_DIR21"
+
+assert_contains "$HOOK_OUTPUT" '"decision": "block"' "UT continues loop after successful iteration"
+ITER_UT_NEXT=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE21" | head -1)
+assert_eq "2" "$ITER_UT_NEXT" "UT iteration increments on success"
+
+describe "E2E with test commit advances iteration"
+
+PROJECT_DIR22=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR22"
+mkdir -p "$PROJECT_DIR22/.claude"
+init_git_repo "$PROJECT_DIR22"
+git_commit_file "$PROJECT_DIR22" "test: add e2e flow" "README.md" "e2e"
+
+SESSION_ID22="e2ecommit123"
+STATE_FILE22="$PROJECT_DIR22/.claude/e2e-loop-${SESSION_ID22}.local.md"
+write_loop_state "$STATE_FILE22" "e2e" 1
+
+TRANSCRIPT22="$PROJECT_DIR22/transcript.jsonl"
+write_transcript "$TRANSCRIPT22" "<reviews_complete/>\n<iteration_complete test_file=\"tests/e2e.spec.ts\"/>"
+
+HOOK_INPUT22=$(build_hook_input "$SESSION_ID22" "$TRANSCRIPT22" "$PROJECT_DIR22")
+run_hook "$HOOK_INPUT22" "$PROJECT_DIR22"
+
+assert_contains "$HOOK_OUTPUT" '"decision": "block"' "E2E continues loop after successful iteration"
+ITER_E2E_NEXT=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE22" | head -1)
+assert_eq "2" "$ITER_E2E_NEXT" "E2E iteration increments on success"
+
+# =============================================================================
 # Summary
 # =============================================================================
 
@@ -751,6 +1626,7 @@ echo -e "${BLUE}═════════════════════�
 echo -e "Tests run:    $TESTS_RUN"
 echo -e "Tests passed: ${GREEN}$TESTS_PASSED${NC}"
 echo -e "Tests failed: ${RED}$TESTS_FAILED${NC}"
+echo -e "Tests skipped: ${YELLOW}$TESTS_SKIPPED${NC}"
 
 if [[ $TESTS_FAILED -gt 0 ]]; then
   echo -e "\n${RED}FAILED${NC} - Some tests did not pass"

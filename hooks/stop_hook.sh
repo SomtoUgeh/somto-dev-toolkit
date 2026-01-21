@@ -65,6 +65,7 @@ extract_regex() {
   if [[ $string =~ $pattern ]]; then
     printf '%s' "${BASH_REMATCH[1]}"
   fi
+  return 0
 }
 
 # Usage: extract_regex_last "string" "pattern"
@@ -110,6 +111,22 @@ extract_regex_last() {
   done
 
   [[ -n "$last_match" ]] && printf '%s' "$last_match"
+  return 0
+}
+
+# Extract last <promise> tag from output (whitespace normalized)
+extract_promise_last() {
+  local text="$1"
+  local normalized
+  normalized=$(printf '%s' "$text" | tr '\r\n' ' ')
+  normalized=$(printf '%s' "$normalized" | sed 's/[[:space:]]\+/ /g')
+  local promise
+  promise=$(extract_regex_last "$normalized" '<promise>([^<]*)</promise>')
+  # Trim leading/trailing whitespace
+  promise="${promise#"${promise%%[![:space:]]*}"}"
+  promise="${promise%"${promise##*[![:space:]]}"}"
+  printf '%s' "$promise"
+  return 0
 }
 
 # Escape special characters for sed replacement string
@@ -393,6 +410,15 @@ get_field() {
   echo "$frontmatter" | grep "^${field}:" | head -1 | sed "s/${field}: *//" | tr -d '"' || true
 }
 
+# Validate PRD phase values (shared)
+is_valid_prd_phase() {
+  local phase="$1"
+  case "$phase" in
+    1|2|2.5|3|3.2|3.5|4|5|5.5|6) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Validate state file fields based on loop type
 # Returns 0 if valid, 1 if invalid (with error message to stderr)
 # Backfills missing loop_type for backward compatibility with pre-0.10.33 state files
@@ -430,13 +456,10 @@ loop_type: \"$expected_loop\"" "$state_file"
         return 1
       fi
       # Valid phases: 1, 2, 2.5, 3, 3.2, 3.5, 4, 5, 5.5, 6
-      case "$phase" in
-        1|2|2.5|3|3.2|3.5|4|5|5.5|6) ;;  # Valid
-        *)
-          echo "Error: Invalid PRD phase '$phase' (valid: 1, 2, 2.5, 3, 3.2, 3.5, 4, 5, 5.5, 6)" >&2
-          return 1
-          ;;
-      esac
+      if ! is_valid_prd_phase "$phase"; then
+        echo "Error: Invalid PRD phase '$phase' (valid: 1, 2, 2.5, 3, 3.2, 3.5, 4, 5, 5.5, 6)" >&2
+        return 1
+      fi
       ;;
     go|ut|e2e)
       local iteration
@@ -578,17 +601,21 @@ fi
 
 # Extract last assistant message (if transcript exists)
 LAST_OUTPUT=""
-if [[ -f "$TRANSCRIPT_PATH" ]] && grep -q '"role":"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null; then
-  LAST_LINE=$(grep '"role":"assistant"' "$TRANSCRIPT_PATH" | tail -1)
+if [[ -f "$TRANSCRIPT_PATH" ]] && grep -Eq '"role"[[:space:]]*:[[:space:]]*"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null; then
+  LAST_LINE=$(grep -E '"role"[[:space:]]*:[[:space:]]*"assistant"' "$TRANSCRIPT_PATH" | tail -1)
   if [[ -n "$LAST_LINE" ]]; then
-    # Capture jq output and errors separately
-    JQ_RESULT=$(echo "$LAST_LINE" | jq -r '
+    # Capture jq output and errors without tripping set -e
+    JQ_RESULT=""
+    JQ_EXIT=0
+    set +e
+    JQ_RESULT=$(printf '%s' "$LAST_LINE" | jq -r '
       .message.content |
       map(select(.type == "text")) |
       map(.text) |
       join("\n")
     ' 2>&1)
     JQ_EXIT=$?
+    set -e
     if [[ $JQ_EXIT -ne 0 ]]; then
       echo "⚠️  Loop ($ACTIVE_LOOP): Failed to parse assistant message JSON - continuing anyway" >&2
       echo "   Error: $JQ_RESULT" >&2
@@ -631,18 +658,42 @@ if [[ "$ACTIVE_LOOP" == "prd" ]]; then
   PHASE_FEATURE=""
   MAX_ITER_TAG=""
   GATE_DECISION=""
+  MARKER_NEXT=""
+  INVALID_NEXT_REASON=""
 
   if [[ -n "$LAST_OUTPUT" ]]; then
     # Use extract_regex_last to get the LAST occurrence (markers may appear in examples/docs)
     # <phase_complete phase="N" feature_name="NAME"/>
     PHASE_COMPLETE=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete phase="([^"]+)"')
     PHASE_FEATURE=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*feature_name="([^"]+)"')
+    MARKER_NEXT=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*next="([^"]+)"')
 
     # <max_iterations>N</max_iterations>
     MAX_ITER_TAG=$(extract_regex_last "$LAST_OUTPUT" '<max_iterations>([0-9]+)</max_iterations>')
 
     # <gate_decision>PROCEED|BLOCK</gate_decision>
     GATE_DECISION=$(extract_regex_last "$LAST_OUTPUT" '<gate_decision>([^<]+)</gate_decision>')
+  fi
+
+  # Validate next phase value from marker (if provided)
+  if [[ -n "$PHASE_COMPLETE" ]] && [[ "$PHASE_COMPLETE" == "$CURRENT_PHASE" ]] && [[ -n "$MARKER_NEXT" ]]; then
+    if ! is_valid_prd_phase "$MARKER_NEXT"; then
+      INVALID_NEXT_REASON="Invalid next phase '$MARKER_NEXT' (valid: 1, 2, 2.5, 3, 3.2, 3.5, 4, 5, 5.5, 6)."
+    else
+      case "$CURRENT_PHASE" in
+        "1")
+          [[ "$MARKER_NEXT" == "2" ]] || INVALID_NEXT_REASON="Invalid next phase '$MARKER_NEXT' for phase 1 (expected 2)."
+          ;;
+        "2")
+          if [[ "$MARKER_NEXT" != "2.5" ]] && [[ "$MARKER_NEXT" != "3" ]]; then
+            INVALID_NEXT_REASON="Invalid next phase '$MARKER_NEXT' for phase 2 (expected 2.5 or 3)."
+          fi
+          ;;
+        "2.5")
+          [[ "$MARKER_NEXT" == "2" ]] || INVALID_NEXT_REASON="Invalid next phase '$MARKER_NEXT' for phase 2.5 (expected 2)."
+          ;;
+      esac
+    fi
   fi
 
   # Helper function to generate phase-specific prompt
@@ -1095,7 +1146,7 @@ After user responds, output:
       ;;
     *)
       # Only valid if phase attribute matches current phase
-      [[ -n "$PHASE_COMPLETE" ]] && [[ "$PHASE_COMPLETE" == "$CURRENT_PHASE" ]] && VALID_MARKER_FOUND=true
+      [[ -n "$PHASE_COMPLETE" ]] && [[ "$PHASE_COMPLETE" == "$CURRENT_PHASE" ]] && [[ -z "$INVALID_NEXT_REASON" ]] && VALID_MARKER_FOUND=true
       ;;
   esac
 
@@ -1111,7 +1162,9 @@ After user responds, output:
     sed_inplace "s/^retry_count: .*/retry_count: $RETRY_COUNT/" "$STATE_FILE"
 
     # Compact error summary (first 100 chars of output or "no output")
-    if [[ -n "$LAST_OUTPUT" ]]; then
+    if [[ -n "$INVALID_NEXT_REASON" ]]; then
+      ERROR_SUMMARY="$INVALID_NEXT_REASON"
+    elif [[ -n "$LAST_OUTPUT" ]]; then
       ERROR_SUMMARY=$(echo "$LAST_OUTPUT" | head -c 200 | tr '\n' ' ' | sed 's/"/\\"/g')
     else
       ERROR_SUMMARY="No text output from Claude (only tool calls)"
@@ -1161,13 +1214,24 @@ $(generate_prd_phase_prompt "$CURRENT_PHASE")"
       exit 0
     else
       # Retry - continue with same phase prompt + hint
-      SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE retry $RETRY_COUNT/$MAX_RETRIES - expected marker not found"
+      if [[ -n "$INVALID_NEXT_REASON" ]]; then
+        SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE retry $RETRY_COUNT/$MAX_RETRIES - invalid next phase"
+      else
+        SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE retry $RETRY_COUNT/$MAX_RETRIES - expected marker not found"
+      fi
       PROMPT_TEXT=$(generate_prd_phase_prompt "$CURRENT_PHASE")
-      PROMPT_TEXT="$PROMPT_TEXT
+      if [[ -n "$INVALID_NEXT_REASON" ]]; then
+        PROMPT_TEXT="$PROMPT_TEXT
+
+---
+**Note:** $INVALID_NEXT_REASON"
+      else
+        PROMPT_TEXT="$PROMPT_TEXT
 
 ---
 **Note:** Previous attempt didn't include the expected marker. Please ensure your response ends with:
 \`$EXPECTED_MARKER\`"
+      fi
 
       jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
       exit 0
@@ -1217,9 +1281,6 @@ $(generate_prd_phase_prompt "$CURRENT_PHASE")"
   # IMPORTANT: Validate that phase attribute matches current phase to prevent
   # accidental advancement from example markers in documentation/output
   if [[ -n "$PHASE_COMPLETE" ]] && [[ "$PHASE_COMPLETE" == "$CURRENT_PHASE" ]]; then
-    # Extract next phase from marker if present
-    MARKER_NEXT=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*next="([^"]+)"')
-
     # Determine next phase based on current phase
     case "$CURRENT_PHASE" in
       "1") NEXT_PHASE="${MARKER_NEXT:-2}" ;;
@@ -1316,8 +1377,8 @@ fi
 # Check for completion promise
 # =============================================================================
 if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]] && [[ -n "$LAST_OUTPUT" ]]; then
-  # Extract text from <promise> tags (use greedy .* to get LAST match, not first)
-  PROMISE_TEXT=$(echo "$LAST_OUTPUT" | perl -0777 -pe 's/.*<promise>(.*?)<\/promise>.*/$1/s; s/^\s+|\s+$//g; s/\s+/ /g' 2>/dev/null || echo "")
+  # Extract text from <promise> tags (last match wins)
+  PROMISE_TEXT=$(extract_promise_last "$LAST_OUTPUT")
 
   if [[ -n "$PROMISE_TEXT" ]] && [[ "$PROMISE_TEXT" = "$COMPLETION_PROMISE" ]]; then
     echo "✅ Loop ($ACTIVE_LOOP): Detected <promise>$COMPLETION_PROMISE</promise>"
@@ -1347,12 +1408,25 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
   CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
   TOTAL_STORIES=$(get_field "$FRONTMATTER" "total_stories")
 
-  if [[ -f "$PRD_PATH" ]] && jq empty "$PRD_PATH" 2>/dev/null; then
-    # Parse structured output markers
-    REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
-    STORY_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<story_complete[^>]*story_id="([^"]+)"')
-    CURRENT_PASSES=$(jq ".stories[] | select(.id == $CURRENT_STORY_ID) | .passes" "$PRD_PATH" 2>/dev/null || echo "false")
-    STORY_TITLE=$(jq -r ".stories[] | select(.id == $CURRENT_STORY_ID) | .title" "$PRD_PATH")
+  if [[ -z "$PRD_PATH" ]] || [[ ! -f "$PRD_PATH" ]]; then
+    PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+    SYSTEM_MSG="⚠️  Loop (go/prd): PRD file not found at '$PRD_PATH'. Restore it or rerun /prd."
+    jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+    exit 0
+  fi
+
+  if ! jq empty "$PRD_PATH" 2>/dev/null; then
+    PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+    SYSTEM_MSG="⚠️  Loop (go/prd): PRD file is invalid JSON at '$PRD_PATH'. Fix the file or rerun /prd."
+    jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+    exit 0
+  fi
+
+  # Parse structured output markers
+  REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
+  STORY_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<story_complete[^>]*story_id="([^"]+)"')
+  CURRENT_PASSES=$(jq ".stories[] | select(.id == $CURRENT_STORY_ID) | .passes" "$PRD_PATH" 2>/dev/null || echo "false")
+  STORY_TITLE=$(jq -r ".stories[] | select(.id == $CURRENT_STORY_ID) | .title" "$PRD_PATH")
 
     # Step 1: Check for story_complete marker (MANDATORY structured output)
     if [[ -z "$STORY_COMPLETE_MARKER" ]]; then
@@ -1579,7 +1653,6 @@ CRITICAL: Only mark the story as passing when it genuinely passes all verificati
           '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
         exit 0
       fi
-  fi
 fi
 
 # =============================================================================
