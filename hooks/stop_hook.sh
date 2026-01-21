@@ -368,6 +368,7 @@ get_field() {
 
 # Validate state file fields based on loop type
 # Returns 0 if valid, 1 if invalid (with error message to stderr)
+# Backfills missing loop_type for backward compatibility with pre-0.10.33 state files
 validate_state_file() {
   local frontmatter="$1"
   local expected_loop="$2"
@@ -377,11 +378,16 @@ validate_state_file() {
   local loop_type
   loop_type=$(get_field "$frontmatter" "loop_type")
 
-  # Validate loop_type matches detected active loop
+  # Backfill missing loop_type (backward compat with pre-0.10.33 state files)
   if [[ -z "$loop_type" ]]; then
-    echo "Error: State file missing 'loop_type' field" >&2
-    return 1
+    echo "Note: State file missing 'loop_type' - backfilling from detected loop '$expected_loop'" >&2
+    # Add loop_type to frontmatter (after first ---)
+    sed_inplace "2i\\
+loop_type: \"$expected_loop\"" "$state_file"
+    loop_type="$expected_loop"
   fi
+
+  # Validate loop_type matches detected active loop
   if [[ "$loop_type" != "$expected_loop" ]]; then
     echo "Error: State file loop_type '$loop_type' doesn't match detected loop '$expected_loop'" >&2
     return 1
