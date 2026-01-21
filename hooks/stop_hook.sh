@@ -88,13 +88,18 @@ extract_regex_last() {
     fi
 
     # Find match position and use substring to advance (safer than pattern-based removal)
-    # This handles backslashes correctly (Windows paths like C:\tmp\spec.md)
+    # Uses ENVIRON instead of -v to handle newlines and backslashes (Windows paths)
     local match_pos
-    match_pos=$(awk -v str="$remaining" -v needle="$full_match" 'BEGIN {
+    export _AWK_STR="$remaining"
+    export _AWK_NEEDLE="$full_match"
+    match_pos=$(awk 'BEGIN {
+      str = ENVIRON["_AWK_STR"]
+      needle = ENVIRON["_AWK_NEEDLE"]
       pos = index(str, needle)
       if (pos > 0) print pos + length(needle) - 1
       else print 0
     }')
+    unset _AWK_STR _AWK_NEEDLE
 
     if [[ "$match_pos" -gt 0 ]] && [[ "$match_pos" -lt "${#remaining}" ]]; then
       remaining="${remaining:$match_pos}"
