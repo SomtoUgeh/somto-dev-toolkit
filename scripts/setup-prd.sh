@@ -56,6 +56,7 @@ fi
 # Create state file with phase 1
 cat > "$STATE_FILE" <<EOF
 ---
+loop_type: "prd"
 mode: "prd"
 active: true
 feature_name: "$FEATURE_NAME"

@@ -225,6 +225,7 @@ COMPLETION_PROMISE_YAML="\"$COMPLETION_PROMISE\""
 STATE_FILE=".claude/e2e-loop-${SESSION_ID}.local.md"
 cat > "$STATE_FILE" <<EOF
 ---
+loop_type: "e2e"
 active: true
 iteration: 1
 max_iterations: $MAX_ITERATIONS

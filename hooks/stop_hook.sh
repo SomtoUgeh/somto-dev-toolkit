@@ -67,19 +67,31 @@ extract_regex() {
   fi
 }
 
-# Usage: extract_regex_last "string" "pattern_with_capture_group"
-# Returns LAST match's capture group (useful for markers that may appear in examples)
+# Usage: extract_regex_last "string" "pattern"
+# Returns LAST match's capture group (or full match if no capture group)
+# Handles patterns with or without capture groups, and glob metacharacters in matches
 extract_regex_last() {
   local string="$1"
   local pattern="$2"
   local last_match=""
+  local full_match=""
 
   # Iterate through all matches, keeping the last one
   local remaining="$string"
   while [[ $remaining =~ $pattern ]]; do
-    last_match="${BASH_REMATCH[1]}"
+    full_match="${BASH_REMATCH[0]}"
+    # Use capture group if present, otherwise use full match
+    if [[ ${#BASH_REMATCH[@]} -gt 1 ]] && [[ -n "${BASH_REMATCH[1]+x}" ]]; then
+      last_match="${BASH_REMATCH[1]}"
+    else
+      last_match="$full_match"
+    fi
+    # Escape glob metacharacters before using in parameter expansion
+    local escaped_match="${full_match//\*/\\*}"
+    escaped_match="${escaped_match//\?/\\?}"
+    escaped_match="${escaped_match//\[/\\[}"
     # Remove matched portion and continue searching
-    remaining="${remaining#*"${BASH_REMATCH[0]}"}"
+    remaining="${remaining#*$escaped_match}"
   done
 
   [[ -n "$last_match" ]] && printf '%s' "$last_match"
@@ -1443,6 +1455,7 @@ Follow the skill's guidance for implementation approach, patterns, and quality s
 
         # Build frontmatter (skills line only if present)
         FRONTMATTER_CONTENT="---
+loop_type: \"go\"
 mode: \"prd\"
 active: true
 prd_path: \"$PRD_PATH\"

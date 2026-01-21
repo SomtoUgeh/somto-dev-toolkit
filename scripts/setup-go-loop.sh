@@ -224,6 +224,7 @@ if [[ "$MODE" == "generic" ]]; then
   # Create generic mode state file
   cat > "$STATE_FILE" <<EOF
 ---
+loop_type: "go"
 mode: "generic"
 active: true
 once: $ONCE_MODE
@@ -394,6 +395,7 @@ Follow the skill's guidance for implementation approach, patterns, and quality s
   # Create PRD mode state file
   cat > "$STATE_FILE" <<EOF
 ---
+loop_type: "go"
 mode: "prd"
 active: true
 once: $ONCE_MODE

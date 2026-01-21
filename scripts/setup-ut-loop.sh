@@ -268,6 +268,7 @@ COMPLETION_PROMISE_YAML="\"$COMPLETION_PROMISE\""
 STATE_FILE=".claude/ut-loop-${SESSION_ID}.local.md"
 cat > "$STATE_FILE" <<EOF
 ---
+loop_type: "ut"
 active: true
 iteration: 1
 max_iterations: $MAX_ITERATIONS
