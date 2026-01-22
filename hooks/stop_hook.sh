@@ -778,12 +778,19 @@ $wave_guidance
 - Go deep on answers - ask follow-ups
 - Continue until you have enough detail to write implementation code (minimum 8-10 questions)
 
-**After Wave 1 (3-4 questions)**, output:
+## Transitions
+
+**After Wave 1 (3-4 questions)** - trigger research:
 \`\`\`
 <phase_complete phase=\"2\" next=\"2.5\"/>
 \`\`\`
 
-This triggers research phase before continuing interview."
+**After interview complete (8-10+ questions, all waves done)** - proceed to spec:
+\`\`\`
+<phase_complete phase=\"2\" next=\"3\"/>
+\`\`\`
+
+**IMPORTANT:** You MUST output one of these markers at the end of your response. The loop cannot advance without the marker."
         ;;
       "2.5")
         prompt="# PRD Loop: Phase 2.5 - Research
