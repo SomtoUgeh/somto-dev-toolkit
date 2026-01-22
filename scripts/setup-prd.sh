@@ -76,6 +76,7 @@ spec_path: ""
 prd_path: ""
 progress_path: ""
 interview_questions: 0
+interview_wave: 1
 max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
@@ -156,6 +157,43 @@ Ready for interview. Output:
 EOF
     ;;
 esac
+
+# Validate hooks are configured
+validate_hooks() {
+  local settings_file="$HOME/.claude/settings.json"
+  local project_settings=".claude/settings.local.json"
+  local hook_found=false
+
+  # Check global settings
+  if [[ -f "$settings_file" ]]; then
+    if jq -e '.hooks.Stop // empty' "$settings_file" >/dev/null 2>&1; then
+      hook_found=true
+    fi
+  fi
+
+  # Check project settings
+  if [[ -f "$project_settings" ]]; then
+    if jq -e '.hooks.Stop // empty' "$project_settings" >/dev/null 2>&1; then
+      hook_found=true
+    fi
+  fi
+
+  # Check if this plugin is installed (hooks come from plugin)
+  local plugin_root="${CLAUDE_PLUGIN_ROOT:-}"
+  if [[ -n "$plugin_root" ]] && [[ -f "$plugin_root/hooks/stop_hook.sh" ]]; then
+    hook_found=true
+  fi
+
+  if [[ "$hook_found" != "true" ]]; then
+    echo ""
+    echo "WARNING: Stop hook may not be configured."
+    echo "   PRD phase transitions require the stop hook."
+    echo "   Ensure somto-dev-toolkit plugin is installed or hooks are configured."
+    echo ""
+  fi
+}
+
+validate_hooks
 
 # Output setup message
 cat <<EOF

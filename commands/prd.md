@@ -135,6 +135,46 @@ agent-browser screenshot --full competitor.png
 
 **Output:** `<phase_complete phase="2.5" next="2"/>` to return to interview with research context.
 
+#### Required Agent Output Formats
+
+The SubagentStop hook validates each agent returns structured findings. Agents that return empty or unstructured output will be blocked and asked to retry.
+
+**prd-codebase-researcher must return:**
+```markdown
+## Existing Patterns
+- [description of patterns found in codebase]
+
+## Files to Modify
+- `path/to/file.ts` - [reason for modification]
+
+## Models/Services Involved
+- [relevant models, services, or modules]
+```
+
+**prd-external-researcher must return:**
+```markdown
+## Best Practices
+- [industry recommendations]
+
+## Code Examples
+- [relevant snippets from documentation/repos]
+
+## Pitfalls to Avoid
+- [common mistakes, anti-patterns]
+```
+
+**git-history-analyzer must return:**
+```markdown
+## History
+- [relevant commits and their context]
+
+## Evolution
+- [how the code evolved over time]
+
+## Contributors
+- [key contributors and their expertise areas]
+```
+
 ### Phase 3: Spec Write
 
 Write comprehensive spec to `plans/<feature>/spec.md`. Include:
@@ -179,6 +219,29 @@ subagent_type="compound-engineering:review:agent-native-reviewer" (AI features)
 ```
 
 Add critical findings to spec's "Review Findings" section.
+
+#### Required Review Agent Output
+
+The SubagentStop hook validates each reviewer returns actionable feedback. Reviews with empty output or no findings/recommendations will be blocked.
+
+**All review agents must include at least one of:**
+- Specific findings (issues, concerns, warnings)
+- Recommendations or suggestions
+- Explicit "no issues found" / "approved" statement
+
+**Example review output structure:**
+```markdown
+## Findings
+- **Critical**: [issue requiring immediate attention]
+- **High**: [significant concern]
+- **Medium**: [improvement opportunity]
+
+## Recommendations
+- [specific actionable suggestions]
+
+## Approved Areas
+- [aspects that look good]
+```
 
 **Output reviews marker first:** `<reviews_complete/>`
 
@@ -253,7 +316,16 @@ Task: subagent_type="somto-dev-toolkit:prd-complexity-estimator" (max_turns: 20)
 prompt: "Estimate complexity for this PRD. <prd_json>{read PRD}</prd_json> <spec_content>{read spec}</spec_content>"
 ```
 
-Wait for agent to return, then output with agent's recommended value:
+Wait for agent to return, then output with agent's recommended value.
+
+**Complexity estimator must return:**
+```xml
+<max_iterations>N</max_iterations>
+```
+Where N is between 5 and 100. The SubagentStop hook validates:
+- Output contains the `<max_iterations>` tag
+- Value is within valid range (5-100)
+- Agent will be blocked and asked to retry if validation fails
 
 **Output:** `<max_iterations>N</max_iterations>` where N is from the agent
 
@@ -272,6 +344,30 @@ esac
 2. Use AskUserQuestion with options: "Run /go now", "Run /go --once", "Done"
 
 **Output:** `<phase_complete phase="6"/>`
+
+---
+
+## SubagentStop Quality Gates
+
+The PRD workflow uses SubagentStop hooks to validate agent output quality before they complete. This prevents:
+- Research agents returning empty or unstructured findings
+- Review agents providing no actionable feedback
+- Complexity estimator failing silently
+
+**How it works:**
+1. When a subagent (Task tool) finishes, SubagentStop hook fires
+2. Hook validates output against expected format for that agent type
+3. If invalid: agent is blocked with guidance, must retry
+4. If valid: agent completes normally
+
+**Validated agent types:**
+| Agent | Required Output |
+|-------|----------------|
+| prd-codebase-researcher | `## Existing Patterns`, `## Files to Modify`, or `## Models` |
+| prd-external-researcher | `## Best Practices`, `## Code Examples`, or `## Pitfalls` |
+| git-history-analyzer | `## History`, `## Evolution`, or `## Contributors` |
+| prd-complexity-estimator | `<max_iterations>N</max_iterations>` (5 <= N <= 100) |
+| All review agents | Findings, recommendations, or explicit "no issues" |
 
 ---
 

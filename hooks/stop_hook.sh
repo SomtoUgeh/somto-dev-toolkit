@@ -646,6 +646,7 @@ if [[ "$ACTIVE_LOOP" == "prd" ]]; then
   SPEC_PATH=$(get_field "$FRONTMATTER" "spec_path")
   PRD_PATH=$(get_field "$FRONTMATTER" "prd_path")
   INTERVIEW_QUESTIONS=$(get_field "$FRONTMATTER" "interview_questions")
+  INTERVIEW_WAVE=$(get_field "$FRONTMATTER" "interview_wave")
   GATE_STATUS=$(get_field "$FRONTMATTER" "gate_status")
   REVIEW_COUNT=$(get_field "$FRONTMATTER" "review_count")
   REVIEWS_COMPLETE=$(get_field "$FRONTMATTER" "reviews_complete")
@@ -653,6 +654,7 @@ if [[ "$ACTIVE_LOOP" == "prd" ]]; then
 
   # Default numeric fields
   [[ ! "$INTERVIEW_QUESTIONS" =~ ^[0-9]+$ ]] && INTERVIEW_QUESTIONS=0
+  [[ ! "$INTERVIEW_WAVE" =~ ^[0-9]+$ ]] && INTERVIEW_WAVE=1
   [[ ! "$REVIEW_COUNT" =~ ^[0-9]+$ ]] && REVIEW_COUNT=0
   [[ ! "$RETRY_COUNT" =~ ^[0-9]+$ ]] && RETRY_COUNT=0
   [[ "$REVIEWS_COMPLETE" != "true" ]] && REVIEWS_COMPLETE="false"
@@ -714,20 +716,42 @@ if [[ "$ACTIVE_LOOP" == "prd" ]]; then
 
     case "$phase" in
       "2")
+        # Calculate current wave based on question count
+        local wave_status=""
+        local wave_guidance=""
+        if [[ $INTERVIEW_WAVE -eq 1 ]]; then
+          wave_status="Wave 1 of 5 (Core Understanding)"
+          wave_guidance="Focus on: problem definition, success criteria, MVP scope"
+        elif [[ $INTERVIEW_WAVE -eq 2 ]]; then
+          wave_status="Wave 2 of 5 (Technical Deep Dive)"
+          wave_guidance="Focus on: systems, data models, code patterns"
+        elif [[ $INTERVIEW_WAVE -eq 3 ]]; then
+          wave_status="Wave 3 of 5 (UX/UI Details)"
+          wave_guidance="Focus on: user flows, error states, edge cases"
+        elif [[ $INTERVIEW_WAVE -eq 4 ]]; then
+          wave_status="Wave 4 of 5 (Edge Cases & Concerns)"
+          wave_guidance="Focus on: failure modes, security, risks"
+        else
+          wave_status="Wave 5 of 5 (Tradeoffs & Decisions)"
+          wave_guidance="Focus on: compromises, non-negotiables, priorities"
+        fi
+
         prompt="# PRD Loop: Phase 2 - Deep Interview
 
 **Feature:** $FEATURE_NAME
+**Progress:** $INTERVIEW_QUESTIONS questions asked | $wave_status
 
-## Your Task
+## Current Focus
+$wave_guidance
 
-Conduct a thorough interview using AskUserQuestion. Interview in waves:
+## Interview Waves
 
-**Wave 1 - Core Understanding** (if not done)
+**Wave 1 - Core Understanding** (3-4 questions)
 - What problem does this solve? For whom?
 - What does success look like?
 - What's the MVP vs nice-to-have?
 
-**Wave 2 - Technical Deep Dive**
+**Wave 2 - Technical Deep Dive** (after research)
 - What systems/services does this touch?
 - What data models are involved?
 - What existing code patterns should we follow?
@@ -1259,13 +1283,22 @@ reviews_complete: true" "$STATE_FILE"
       "2")
         if [[ "$MARKER_NEXT" == "2.5" ]]; then
           NEXT_PHASE="2.5"
+          # Completed wave 1, going to research
         elif [[ "$MARKER_NEXT" == "3" ]]; then
           NEXT_PHASE="3"
+          # Interview complete, all waves done
         else
           NEXT_PHASE="2.5"  # Default to research after wave 1
         fi
         ;;
-      "2.5") NEXT_PHASE="${MARKER_NEXT:-2}" ;;  # Back to interview
+      "2.5")
+        NEXT_PHASE="${MARKER_NEXT:-2}"  # Back to interview
+        # Advance to next wave after research
+        NEW_WAVE=$((INTERVIEW_WAVE + 1))
+        [[ $NEW_WAVE -gt 5 ]] && NEW_WAVE=5
+        sed_inplace "s/^interview_wave: .*/interview_wave: $NEW_WAVE/" "$STATE_FILE"
+        INTERVIEW_WAVE=$NEW_WAVE
+        ;;
       "3")
         NEXT_PHASE="3.2"
         # Extract spec_path from marker
@@ -1520,6 +1553,77 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
     exit 0
   fi
 
+  # ===========================================================================
+  # RECONCILIATION: Sync state from prd.json (authoritative source)
+  # ===========================================================================
+  # This prevents drift between local.md state and prd.json story status.
+  # If prd.json shows current story passes but local.md hasn't advanced,
+  # we auto-advance to prevent getting stuck.
+
+  reconcile_prd_state() {
+    local state_file="$1"
+    local prd_path="$2"
+    local current_story="$3"
+    local reconciled=false
+
+    # Check if current story already passes in prd.json
+    local story_passes
+    story_passes=$(jq -r ".stories[] | select(.id == $current_story) | .passes" "$prd_path" 2>/dev/null)
+
+    if [[ "$story_passes" == "true" ]]; then
+      # Story passes but we're still on it - find next incomplete story
+      local next_incomplete
+      next_incomplete=$(jq -r '[.stories[] | select(.passes == false)] | sort_by(.priority) | first | .id // empty' "$prd_path")
+
+      if [[ -n "$next_incomplete" ]]; then
+        echo "⚠️  Loop (go/prd): RECONCILE - Story #$current_story already passes in prd.json. Advancing to #$next_incomplete." >&2
+        sed_inplace "s/^current_story_id: .*/current_story_id: $next_incomplete/" "$state_file"
+        CURRENT_STORY_ID="$next_incomplete"
+        reconciled=true
+      else
+        # All stories complete - check if we should end the loop
+        echo "⚠️  Loop (go/prd): RECONCILE - All stories pass in prd.json. Completing loop." >&2
+        # Mark for completion (handled after reconciliation)
+        ALL_STORIES_COMPLETE=true
+      fi
+    fi
+
+    # Sync total_stories count
+    local actual_total
+    actual_total=$(jq '.stories | length' "$prd_path" 2>/dev/null || echo "0")
+    local recorded_total="$TOTAL_STORIES"
+
+    if [[ "$actual_total" != "$recorded_total" ]] && [[ "$actual_total" -gt 0 ]]; then
+      echo "⚠️  Loop (go/prd): RECONCILE - total_stories mismatch (state: $recorded_total, prd: $actual_total). Updating." >&2
+      sed_inplace "s/^total_stories: .*/total_stories: $actual_total/" "$state_file"
+      TOTAL_STORIES="$actual_total"
+    fi
+
+    [[ "$reconciled" == "true" ]]
+  }
+
+  # Run reconciliation
+  ALL_STORIES_COMPLETE=false
+  if reconcile_prd_state "$STATE_FILE" "$PRD_PATH" "$CURRENT_STORY_ID"; then
+    # State was reconciled - re-read frontmatter
+    FRONTMATTER=$(parse_frontmatter "$STATE_FILE")
+    CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
+    TOTAL_STORIES=$(get_field "$FRONTMATTER" "total_stories")
+  fi
+
+  # Handle all-stories-complete from reconciliation
+  if [[ "$ALL_STORIES_COMPLETE" == "true" ]]; then
+    echo "✅ Loop (go/prd): All stories complete! (detected via reconciliation)"
+    echo "   Feature '$FEATURE_NAME' is done."
+    notify "Loop (go/prd)" "All stories complete! $FEATURE_NAME done"
+    if [[ -f "$PROGRESS_PATH" ]]; then
+      echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"COMPLETED\",\"notes\":\"All stories complete (reconciled from prd.json)\"}" >> "$PROGRESS_PATH"
+    fi
+    show_loop_summary "$STATE_FILE" "$ITERATION"
+    rm "$STATE_FILE"
+    exit 0
+  fi
+
   # Parse structured output markers
   REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
   STORY_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<story_complete[^>]*story_id="([^"]+)"')
@@ -1550,15 +1654,31 @@ Then run reviews and output markers."
 6. Output: \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
       else
         # Reviews done, passes true, but no story_complete marker
-        SYSTEM_MSG="⚠️  Loop (go/prd): Reviews done ✓ Story passes ✓ Now commit and output:
+        # FALLBACK: Check if commit exists - if so, auto-advance without marker
+        if git log --oneline -10 2>/dev/null | grep -qiE "(story.*#?${CURRENT_STORY_ID}([^0-9]|$)|#${CURRENT_STORY_ID}([^0-9]|$)|story ${CURRENT_STORY_ID}([^0-9]|$))"; then
+          echo "⚠️  Loop (go/prd): AUTO-ADVANCE - Story #$CURRENT_STORY_ID passes ✓ reviews ✓ commit ✓ (marker missing but work complete)" >&2
+          # Synthesize the marker for downstream processing
+          STORY_COMPLETE_MARKER="$CURRENT_STORY_ID"
+          # Fall through to normal completion logic below
+        else
+          SYSTEM_MSG="⚠️  Loop (go/prd): Reviews done ✓ Story passes ✓ Now commit and output:
 \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
+          jq -n \
+            --arg prompt "$PROMPT_TEXT" \
+            --arg msg "$SYSTEM_MSG" \
+            '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+          exit 0
+        fi
       fi
 
-      jq -n \
-        --arg prompt "$PROMPT_TEXT" \
-        --arg msg "$SYSTEM_MSG" \
-        '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-      exit 0
+      # If we get here without a marker but didn't exit, check again
+      if [[ -z "$STORY_COMPLETE_MARKER" ]]; then
+        jq -n \
+          --arg prompt "$PROMPT_TEXT" \
+          --arg msg "$SYSTEM_MSG" \
+          '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+        exit 0
+      fi
     fi
 
     # Step 2: Verify story_complete marker matches current story
