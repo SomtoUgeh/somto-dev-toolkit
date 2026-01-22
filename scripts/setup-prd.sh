@@ -78,7 +78,6 @@ progress_path: ""
 interview_questions: 0
 interview_wave: 1
 max_iterations: 0
-iteration: 1
 reviews_complete: false
 gate_status: "pending"
 review_count: 0

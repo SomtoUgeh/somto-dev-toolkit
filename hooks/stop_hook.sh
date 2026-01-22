@@ -358,16 +358,6 @@ index_session_for_qmd() {
 }
 trap index_session_for_qmd EXIT
 
-# =============================================================================
-# GUARD 3: Yield to ralph-loop if active (prevent hook conflicts)
-# =============================================================================
-# ralph-loop uses a different state file pattern - if it's active, let it handle
-RALPH_STATE=".claude/ralph-loop.local.md"
-if [[ -f "$RALPH_STATE" ]]; then
-  # ralph-loop is active - yield to it (exit 0 = allow, let ralph hook block)
-  exit 0
-fi
-
 ACTIVE_LOOP=""
 STATE_FILE=""
 
@@ -1412,43 +1402,85 @@ reviews_complete: true" "$STATE_FILE"
   fi
 
   if [[ -z "$NEXT_PHASE" ]] && [[ "$VALID_MARKER_FOUND" != "true" ]]; then
-    # No valid marker found - continue anyway (ralph-loop style: never stop, just keep prompting)
-    # This prevents the loop from breaking when Claude forgets the marker
-    ITERATION=$((ITERATION + 1))
-    sed_inplace "s/^iteration: .*/iteration: $ITERATION/" "$STATE_FILE"
+    # No valid marker found - increment retry count
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    sed_inplace "s/^retry_count: .*/retry_count: $RETRY_COUNT/" "$STATE_FILE"
 
-    # Check max_iterations limit
-    MAX_ITERATIONS=$(get_field "$FRONTMATTER" "max_iterations")
-    [[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]] && MAX_ITERATIONS=0
-
-    if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $ITERATION -ge $MAX_ITERATIONS ]]; then
-      echo "🛑 Loop (prd): Max iterations ($MAX_ITERATIONS) reached in phase $CURRENT_PHASE" >&2
-      notify "Loop (prd)" "Max iterations reached in phase $CURRENT_PHASE"
-      rm "$STATE_FILE"
-      exit 0
-    fi
-
-    # Build hint based on what went wrong
-    local HINT=""
+    # Compact error summary (first 100 chars of output or "no output")
     if [[ -n "$INVALID_NEXT_REASON" ]]; then
-      HINT="**Note:** $INVALID_NEXT_REASON"
-      SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE - invalid marker, continuing..."
-    elif [[ -z "$LAST_OUTPUT" ]]; then
-      HINT="**Note:** I only saw tool calls, no text output. Remember to include the phase marker in your response text."
-      SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE iteration $ITERATION - no text output (continuing)"
+      ERROR_SUMMARY="$INVALID_NEXT_REASON"
+    elif [[ -n "$LAST_OUTPUT" ]]; then
+      ERROR_SUMMARY=$(echo "$LAST_OUTPUT" | head -c 200 | LC_ALL=C tr '\n' ' ' | sed 's/"/\\"/g')
     else
-      HINT="**Note:** Continue working. When ready, output the marker shown below."
-      SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE iteration $ITERATION - continuing..."
+      ERROR_SUMMARY="No text output from Claude (only tool calls)"
     fi
+    # Escape for sed replacement to handle /, &, \ in error messages
+    ESCAPED_ERROR=$(escape_sed_replacement "$ERROR_SUMMARY")
+    sed_inplace "s/^last_error: .*/last_error: \"$ESCAPED_ERROR\"/" "$STATE_FILE"
 
-    PROMPT_TEXT=$(generate_prd_phase_prompt "$CURRENT_PHASE")
-    PROMPT_TEXT="$PROMPT_TEXT
+    if [[ $RETRY_COUNT -ge $MAX_RETRIES ]]; then
+      # Max retries reached - stop and ask user for help
+      echo "⚠️  Loop (prd): Phase $CURRENT_PHASE failed after $MAX_RETRIES attempts" >&2
+      echo "" >&2
+      echo "   Expected marker: $EXPECTED_MARKER" >&2
+      echo "   Last output: ${ERROR_SUMMARY:0:100}..." >&2
+      echo "" >&2
+      echo "   The loop is pausing for your help." >&2
+      echo "   Options:" >&2
+      echo "     - Check Claude's output and guide it to produce the marker" >&2
+      echo "     - Run /cancel-prd to stop the loop" >&2
+      echo "     - Manually edit the state file to advance phase" >&2
+      notify "Loop (prd)" "Phase $CURRENT_PHASE needs help after $MAX_RETRIES retries"
+
+      # Don't delete state file - let user intervene
+      # Return a prompt asking for the expected output
+      RECOVERY_PROMPT="# PRD Loop: Recovery Needed
+
+**Phase $CURRENT_PHASE failed after $MAX_RETRIES attempts.**
+
+I couldn't find the expected output marker in your response.
+
+**Expected:** \`$EXPECTED_MARKER\`
+
+**What I saw:** ${ERROR_SUMMARY:0:200}
+
+## Please Help
+
+Either:
+1. Output the expected marker now
+2. Tell me what's blocking you so I can help
+
+$(generate_prd_phase_prompt "$CURRENT_PHASE")"
+
+      jq -n \
+        --arg prompt "$RECOVERY_PROMPT" \
+        --arg msg "⚠️  Loop (prd): Phase $CURRENT_PHASE needs help - no valid marker found after $MAX_RETRIES attempts" \
+        '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    else
+      # Retry - continue with same phase prompt + hint
+      if [[ -n "$INVALID_NEXT_REASON" ]]; then
+        SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE retry $RETRY_COUNT/$MAX_RETRIES - invalid next phase"
+      else
+        SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE retry $RETRY_COUNT/$MAX_RETRIES - expected marker not found"
+      fi
+      PROMPT_TEXT=$(generate_prd_phase_prompt "$CURRENT_PHASE")
+      if [[ -n "$INVALID_NEXT_REASON" ]]; then
+        PROMPT_TEXT="$PROMPT_TEXT
 
 ---
-$HINT"
+**Note:** $INVALID_NEXT_REASON"
+      else
+        PROMPT_TEXT="$PROMPT_TEXT
 
-    jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-    exit 0
+---
+**Note:** Previous attempt didn't include the expected marker. Please ensure your response ends with:
+\`$EXPECTED_MARKER\`"
+      fi
+
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
   fi
 
   # Update state file with new phase
