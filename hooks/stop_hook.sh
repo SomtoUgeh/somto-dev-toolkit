@@ -998,29 +998,25 @@ Read the spec first, then pass content to each reviewer.
    - subagent_type: \"compound-engineering:review:agent-native-reviewer\"
    - max_turns: 15
 
-**After reviews complete:**
-- Add critical items to spec's \"Review Findings\" section
-- Update User Stories if reviewers found missing flows
-- Prioritize findings by severity (Critical > High > Medium)
-- Output reviews marker:
+**After ALL review agents return:**
+1. Add critical items to spec's \"Review Findings\" section
+2. Update User Stories if reviewers found missing flows
+3. Prioritize findings by severity (Critical > High > Medium)
+4. If critical issues found, use AskUserQuestion: \"Reviewers found <issues>. Address now or proceed?\"
+
+**IMPORTANT:** After incorporating findings, output BOTH markers in the SAME response:
 \`\`\`
 <reviews_complete/>
-\`\`\`
-
-**Gate Decision (after reviews marker):**
-If critical security/architecture issues found, use AskUserQuestion:
-\"Reviewers found <issues>. Address now or proceed to PRD generation?\"
-
-Output gate decision:
-\`\`\`
 <gate_decision>PROCEED</gate_decision>
 \`\`\`
-or
+
+Or if blocking:
 \`\`\`
+<reviews_complete/>
 <gate_decision>BLOCK</gate_decision>
 \`\`\`
 
-If BLOCK, address issues then re-output PROCEED."
+**You MUST include these markers in your TEXT response, not just in tool calls.**"
         ;;
       "4")
         prompt="# PRD Loop: Phase 4 - Generate PRD JSON
@@ -1239,8 +1235,9 @@ After user responds, output:
     SYSTEM_MSG="✅ Loop (prd): Phase 5.5 complete! max_iterations=$MAX_ITER_TAG. Advancing to phase 6."
   fi
 
-  # Phase 3.5: reviews_complete required before gate decision
+  # Phase 3.5: reviews_complete AND gate_decision required (can be in same response)
   if [[ "$CURRENT_PHASE" == "3.5" ]]; then
+    # Track if reviews marker found in THIS response
     if [[ -n "$REVIEWS_COMPLETE_MARKER" ]]; then
       if grep -q '^reviews_complete:' "$STATE_FILE"; then
         sed_inplace "s/^reviews_complete: .*/reviews_complete: true/" "$STATE_FILE"
@@ -1253,12 +1250,9 @@ reviews_complete: true" "$STATE_FILE"
         sed_inplace "s/^retry_count: .*/retry_count: 0/" "$STATE_FILE"
         sed_inplace "s/^last_error: .*/last_error: \"\"/" "$STATE_FILE"
       fi
-      SYSTEM_MSG="✅ Loop (prd): Reviews complete. Output <gate_decision>PROCEED</gate_decision> or <gate_decision>BLOCK</gate_decision>."
-      PROMPT_TEXT=$(generate_prd_phase_prompt "3.5")
-      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-      exit 0
     fi
 
+    # Check for gate decision (requires reviews_complete first or in same response)
     if [[ -n "$GATE_DECISION" ]]; then
       if [[ "$REVIEWS_COMPLETE" != "true" ]]; then
         SYSTEM_MSG="⚠️  Loop (prd): Gate decision requires reviews first. Output <reviews_complete/> before <gate_decision>."
@@ -1272,16 +1266,20 @@ reviews_complete: true" "$STATE_FILE"
         sed_inplace "s/^gate_status: .*/gate_status: proceed/" "$STATE_FILE"
         SYSTEM_MSG="✅ Loop (prd): Review gate passed! Advancing to phase 4."
       elif [[ "$GATE_DECISION" == "BLOCK" ]]; then
-        # Stay on phase 3.5, user needs to address issues
         REVIEW_COUNT=$((REVIEW_COUNT + 1))
         sed_inplace "s/^review_count: .*/review_count: $REVIEW_COUNT/" "$STATE_FILE"
         sed_inplace "s/^gate_status: .*/gate_status: blocked/" "$STATE_FILE"
         SYSTEM_MSG="⚠️  Loop (prd): Review gate blocked. Address issues then output <gate_decision>PROCEED</gate_decision>"
-        # Continue without advancing
         PROMPT_TEXT=$(generate_prd_phase_prompt "3.5")
         jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
         exit 0
       fi
+    elif [[ -n "$REVIEWS_COMPLETE_MARKER" ]] && [[ -z "$GATE_DECISION" ]]; then
+      # reviews_complete but no gate_decision - prompt for gate decision
+      SYSTEM_MSG="✅ Loop (prd): Reviews complete. Now output <gate_decision>PROCEED</gate_decision> or <gate_decision>BLOCK</gate_decision>."
+      PROMPT_TEXT=$(generate_prd_phase_prompt "3.5")
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
     fi
   fi
 
