@@ -9,29 +9,92 @@ Personal collection of Claude Code tools and skills.
 /plugin install somto-dev-toolkit@somto-dev-toolkit
 ```
 
-## Contents
+## Commands (15)
 
-### Skills
+### Loop Commands
 
-**blog-post-writer** - Transform brain dumps into polished blog posts with conversational, authentic tone. Includes voice guidelines, story circle framework, and technical storytelling patterns.
+| Command | Description |
+|---------|-------------|
+| `/go` | Iterative task loop (generic or PRD-aware) |
+| `/prd` | Deep interview to build PRD for features |
+| `/ut` | Unit test coverage improvement loop |
+| `/e2e` | Playwright E2E test development loop |
 
-**technical-svg-diagrams** - Generate clean, minimal SVG diagrams in a consistent style. Supports architecture, flow, and component diagrams with built-in WebP export.
+### Control Commands
 
-### Commands
+| Command | Description |
+|---------|-------------|
+| `/cancel-go` | Cancel active go loop |
+| `/cancel-prd` | Cancel active PRD loop |
+| `/cancel-ut` | Cancel active unit test loop |
+| `/cancel-e2e` | Cancel active E2E test loop |
 
-**prd** - Deep interview to build comprehensive specs + PRD JSON for Ralph Wiggum-style iteration. Generates spec, PRD, and progress files, then copies ralph-loop command to clipboard.
+### Help Commands
 
+| Command | Description |
+|---------|-------------|
+| `/go-help` | Help for the go loop command |
+| `/ut-help` | Explain the unit test loop technique |
+| `/e2e-help` | Explain the E2E test loop technique |
+
+### Session & Utility Commands
+
+| Command | Description |
+|---------|-------------|
+| `/fork-detect` | Search past sessions semantically and fork |
+| `/sync-sessions` | Sync Claude Code sessions to qmd index |
+| `/deslop` | Remove AI-generated code slop from branch |
+| `/setup-git-guard` | Install git safety guard hook |
+
+## Agents (3)
+
+| Agent | Description |
+|-------|-------------|
+| `prd-codebase-researcher` | Research codebase patterns for PRD development |
+| `prd-external-researcher` | Research external best practices using Exa |
+| `prd-complexity-estimator` | Estimate iteration counts for /go loops |
+
+## Skills (3)
+
+| Skill | Description |
+|-------|-------------|
+| `blog-post-writer` | Transform brain dumps into polished blog posts |
+| `technical-svg-diagrams` | Generate clean, minimal SVG diagrams |
+| `biome-gritql` | GritQL patterns for Biome linting |
+
+## Hooks (4)
+
+| Event | Purpose |
+|-------|---------|
+| `SessionStart` | Initialize session state |
+| `Stop` | Enforce iterative workflows (go/ut/e2e/prd loops) |
+| `SubagentStop` | Validate research agent outputs |
+| `PreToolUse` | Git safety guard (blocks destructive commands) |
+
+## Usage Examples
+
+### PRD-based Development
 ```
-/somto-dev-toolkit:prd "add user authentication"
-/somto-dev-toolkit:prd ./plans/feature.md
-/somto-dev-toolkit:prd ./specs/
+/prd "add user authentication"
+# Interview process generates spec + PRD
+# Then run the go loop:
+/go plans/auth/prd.json
 ```
 
-Outputs:
-- `plans/<feature>-spec.md` - comprehensive spec
-- `plans/<feature>.prd.json` - user stories with pass/fail status
-- `plans/<feature>.progress.txt` - iteration log (JSON lines)
-- ralph-loop command copied to clipboard
+### Unit Test Coverage
+```
+/ut "improve coverage for auth module" --target 80%
+```
+
+### E2E Testing
+```
+/e2e "add checkout flow tests"
+```
+
+### Git Safety Guard
+```
+/setup-git-guard project  # or 'user' for global
+```
 
 ## Updating
 

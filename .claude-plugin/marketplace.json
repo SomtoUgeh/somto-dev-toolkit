@@ -12,7 +12,7 @@
       "name": "somto-dev-toolkit",
       "source": "./",
       "description": "Personal collection of Claude Code tools and skills",
-      "version": "0.10.48",
+      "version": "1.0.0",
       "author": {
         "name": "Somto Odera"
       },
@@ -30,7 +30,11 @@
         "e2e",
         "playwright",
         "go",
-        "prd"
+        "prd",
+        "go-loop",
+        "qmd",
+        "session-index",
+        "fork-detect"
       ]
     }
   ]

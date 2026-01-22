@@ -48,7 +48,7 @@ register_cleanup_dir() {
 
 cleanup() {
   local dir
-  for dir in "${CLEANUP_DIRS[@]}"; do
+  for dir in "${CLEANUP_DIRS[@]+"${CLEANUP_DIRS[@]}"}"; do
     [[ -n "$dir" ]] && rm -rf "$dir"
   done
 }
@@ -69,7 +69,7 @@ mktemp_file() {
 
 # Source the functions we want to test (extract them first)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOK_SCRIPT="$SCRIPT_DIR/stop_hook.sh"
+HOOK_SCRIPT="$SCRIPT_DIR/../hooks/stop_hook.sh"
 
 if [[ ! -f "$HOOK_SCRIPT" ]]; then
   echo "stop_hook.sh not found at $HOOK_SCRIPT" >&2

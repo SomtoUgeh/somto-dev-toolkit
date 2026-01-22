@@ -1,9 +1,7 @@
 ---
+name: setup-git-guard
 description: Install git safety guard hook at project or user scope
-input:
-  scope:
-    type: string
-    description: Where to install - 'project' or 'user'
+argument-hint: "[project|user]"
 ---
 
 # Git Safety Guard Setup
@@ -12,7 +10,7 @@ You are helping the user install the git safety guard hook. This hook blocks des
 
 ## Installation Scope
 
-The user wants to install at: **{{ scope }}** scope
+The user wants to install at: **$ARGUMENTS** scope
 
 - **project**: Installs to `.claude/settings.json` - applies to this project only, can be shared via git
 - **user**: Installs to `~/.claude/settings.json` - applies to ALL Claude Code sessions
@@ -94,7 +92,7 @@ b. Read existing `~/.claude/settings.json` if it exists, then merge the hook con
 ## After Installation
 
 Tell the user:
-- The git guard is now active for {{ scope }} scope
+- The git guard is now active for $ARGUMENTS scope
 - It blocks: `git reset --hard`, `git checkout --`, `git clean -f`, `rm -rf`, force pushes, stash drops
 - Safe operations are allowed: `git checkout -b`, `rm -rf node_modules`, `git restore --staged`
 - To disable: remove the PreToolUse hook from the settings file

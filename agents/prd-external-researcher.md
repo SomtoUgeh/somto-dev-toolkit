@@ -26,7 +26,7 @@ Given a feature topic, find:
 
 1. Use `mcp__exa__get_code_context_exa` for code examples and API patterns
 2. Use `mcp__exa__web_search_exa` for best practices and documentation
-3. Focus on 2024-2025 sources for current recommendations
+3. Focus on 2025-2026 sources for current recommendations
 
 ## Output Format
 
