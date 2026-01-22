@@ -17,6 +17,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/loop-helpers.sh
 source "$SCRIPT_DIR/lib/loop-helpers.sh"
 
+# =============================================================================
+# AFK Mode Detection - Delegate to external loop script
+# =============================================================================
+# If --afk flag is present, delegate to afk-go.sh for Ralph-style external loop
+# This provides fresh context per iteration (no context rot) and true AFK execution
+
+for arg in "$@"; do
+  if [[ "$arg" == "--afk" ]]; then
+    # Remove --afk from args and pass rest to afk-go.sh
+    afk_args=()
+    for a in "$@"; do
+      [[ "$a" != "--afk" ]] && afk_args+=("$a")
+    done
+    exec "$SCRIPT_DIR/afk-go.sh" "${afk_args[@]}"
+  fi
+done
+
+# =============================================================================
+# HITL Mode - Hook-based loop (default)
+# =============================================================================
+
 # Defaults
 MODE=""
 PROMPT_PARTS=()
@@ -43,7 +64,29 @@ OPTIONS:
   --completion-promise '<text>'   Promise phrase for generic mode (required)
   --max-iterations <n>            Safety limit (default: 50)
   --once                          Run single iteration (HITL mode), then stop
+  --afk                           AFK mode: external Ralph-style loop (see below)
   -h, --help                      Show this help message
+
+AFK MODE (--afk):
+  Runs an external bash loop instead of hook-based continuation.
+  Each iteration is a fresh Claude session reading from files.
+
+  Benefits:
+    - No context rot (fresh context per iteration)
+    - True hands-off execution
+    - Optional streaming output (--stream)
+    - Optional Docker sandbox (--sandbox)
+
+  AFK-specific options (passed through to afk-go.sh):
+    --stream                      Real-time output visibility via jq
+    --sandbox                     Run in Docker sandbox (safer)
+    --verbose                     Show detailed progress
+    --dry-run                     Preview without executing
+    --no-notify                   Disable desktop notifications
+
+  Examples:
+    /go plans/auth/prd.json --afk --max 30
+    /go plans/auth/prd.json --afk --stream --sandbox
 
 GENERIC MODE:
   Loops until you output <promise>YOUR_TEXT</promise>

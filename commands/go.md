@@ -1,7 +1,7 @@
 ---
 name: go
 description: Iterative task loop (generic or PRD-aware)
-argument-hint: "<prompt|prd.json> [--completion-promise TEXT] [--max-iterations N]"
+argument-hint: "<prompt|prd.json> [--afk] [--completion-promise TEXT] [--max-iterations N]"
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-go-loop.sh:*)
 hide-from-slash-command-tool: "true"
@@ -44,6 +44,32 @@ Single iteration, then stop for review. Use for learning, debugging prompts, or 
 ```
 
 Workflow: Run `--once` repeatedly until you trust the behavior, then switch to full loop.
+
+### AFK Mode (--afk)
+External bash loop for truly hands-off execution. Ralph Wiggum style.
+
+```
+/go plans/auth/prd.json --afk                    # External loop, default 50 iterations
+/go plans/auth/prd.json --afk --max 30           # Limit to 30 iterations
+/go plans/auth/prd.json --afk --stream           # Real-time output visibility
+/go plans/auth/prd.json --afk --sandbox          # Docker sandbox for safety
+/go plans/auth/prd.json --afk --stream --sandbox # Recommended for overnight runs
+```
+
+**Key differences from HITL:**
+- Each iteration is a **fresh Claude session** (prevents context rot)
+- State persists in **files only** (prd.json, progress.txt)
+- No hook-based continuation - external bash for loop
+- Optional streaming output via jq for visibility while AFK
+- Optional Docker sandbox for safety
+
+**When to use:**
+- Bulk implementation work (many stories)
+- Low-risk, well-defined tasks
+- Overnight/unattended runs
+- When you trust your PRD and want hands-off execution
+
+**Progression:** Start with `--once` to learn → Graduate to default (hook-based) → Go `--afk` when confident
 
 ## Quality Expectations
 
