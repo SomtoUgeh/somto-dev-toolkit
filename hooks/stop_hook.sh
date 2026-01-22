@@ -149,35 +149,40 @@ escape_sed_replacement() {
   printf '%s' "$str"
 }
 
-# Portable sed in-place edit (works on macOS, Linux, Windows Git Bash)
+# Portable sed in-place edit (works on macOS, Linux, Windows/WSL)
 # Usage: sed_inplace "s/old/new/" "file"
 # WARNING: If replacement contains user input, use escape_sed_replacement first!
+# Note: Uses /tmp to avoid triggering file watchers in .claude/ directory (Windows/WSL EINVAL fix)
 sed_inplace() {
   local expr="$1"
   local file="$2"
-  local temp_file="${file}.tmp.$$"
-  sed "$expr" "$file" > "$temp_file" && mv "$temp_file" "$file"
+  local temp_file="/tmp/sed_inplace_$$.tmp"
+  sed "$expr" "$file" > "$temp_file" || { rm -f "$temp_file"; return 1; }
+  # Try mv first, fall back to cp+rm for cross-filesystem
+  mv "$temp_file" "$file" 2>/dev/null || { cp "$temp_file" "$file" && rm -f "$temp_file"; }
 }
 
-# Update iteration in state file safely (same directory to avoid cross-filesystem issues)
+# Update iteration in state file safely
+# Note: Uses /tmp to avoid triggering file watchers in .claude/ directory (Windows/WSL EINVAL fix)
 update_iteration() {
   local state_file="$1"
   local new_iteration="$2"
-  local temp_file="${state_file}.tmp.$$"
+  local temp_file="/tmp/update_iter_$$.tmp"
 
   sed "s/^iteration: .*/iteration: $new_iteration/" "$state_file" > "$temp_file"
-  mv "$temp_file" "$state_file"
+  mv "$temp_file" "$state_file" 2>/dev/null || { cp "$temp_file" "$state_file" && rm -f "$temp_file"; }
 }
 
 # Write state file atomically (write to temp, then move)
 # Uses printf to handle multiline content safely
+# Note: Uses /tmp to avoid triggering file watchers in .claude/ directory (Windows/WSL EINVAL fix)
 write_state_file() {
   local state_file="$1"
   local content="$2"
-  local temp_file="${state_file}.tmp.$$"
+  local temp_file="/tmp/write_state_$$.tmp"
 
   printf '%s\n' "$content" > "$temp_file"
-  mv "$temp_file" "$state_file"
+  mv "$temp_file" "$state_file" 2>/dev/null || { cp "$temp_file" "$state_file" && rm -f "$temp_file"; }
 }
 
 # Send desktop notification on loop completion (cross-platform, non-blocking)
