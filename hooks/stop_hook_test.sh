@@ -870,6 +870,13 @@ write_go_prd_state() {
   local current_story_id="$5"
   local total_stories="$6"
   local iteration="$7"
+  local working_branch="${8:-}"
+  local branch_setup_done="${9:-}"
+
+  if [[ -n "$working_branch" ]]; then
+    working_branch=${working_branch//\"/\\\"}
+  fi
+
   cat > "$state_file" << EOF
 ---
 loop_type: "go"
@@ -881,6 +888,17 @@ progress_path: ""
 feature_name: "$feature_name"
 current_story_id: $current_story_id
 total_stories: $total_stories
+EOF
+
+  if [[ -n "$working_branch" ]]; then
+    printf 'working_branch: "%s"\n' "$working_branch" >> "$state_file"
+  fi
+
+  if [[ -n "$branch_setup_done" ]]; then
+    printf 'branch_setup_done: %s\n' "$branch_setup_done" >> "$state_file"
+  fi
+
+  cat >> "$state_file" << EOF
 iteration: $iteration
 max_iterations: 10
 started_at: "2024-01-01T00:00:00Z"
@@ -1049,8 +1067,11 @@ input_raw: "Auth"
 spec_path: ""
 prd_path: ""
 progress_path: ""
+working_branch: "feat/auth"
+branch_setup_done: true
 interview_questions: 0
 max_iterations: 0
+reviews_complete: false
 gate_status: "pending"
 review_count: 0
 retry_count: 0
@@ -1072,6 +1093,460 @@ PHASE_UPDATED=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2" | head -
 assert_eq "3.2" "$PHASE_UPDATED" "phase advances to 3.2"
 SPEC_UPDATED=$(sed -n 's/^spec_path: "\(.*\)"/\1/p' "$STATE_FILE2" | head -1)
 assert_eq 'C:\Users\Dev\spec.md' "$SPEC_UPDATED" "spec_path preserved with backslashes"
+BRANCH_UPDATED=$(sed -n 's/^working_branch: "\(.*\)"/\1/p' "$STATE_FILE2" | head -1)
+assert_eq "feat/auth" "$BRANCH_UPDATED" "working_branch preserved across phase transition"
+BRANCH_DONE_UPDATED=$(sed -n 's/^branch_setup_done: \(.*\)/\1/p' "$STATE_FILE2" | head -1)
+assert_eq "true" "$BRANCH_DONE_UPDATED" "branch_setup_done preserved across phase transition"
+
+describe "PRD phase 3.5 requires reviews marker"
+
+PROJECT_DIR2B=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2B"
+mkdir -p "$PROJECT_DIR2B/.claude" "$PROJECT_DIR2B/plans"
+
+SESSION_ID2B="gatephase123"
+STATE_FILE2B="$PROJECT_DIR2B/.claude/prd-loop-${SESSION_ID2B}.local.md"
+cat > "$STATE_FILE2B" << EOF
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-review"
+current_phase: "3.5"
+input_type: "idea"
+input_path: ""
+input_raw: "Review feature"
+spec_path: "$PROJECT_DIR2B/plans/spec.md"
+prd_path: ""
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+cat > "$PROJECT_DIR2B/plans/spec.md" << 'EOF'
+# Spec
+## Notes
+EOF
+
+TRANSCRIPT2B="$PROJECT_DIR2B/transcript.jsonl"
+write_transcript "$TRANSCRIPT2B" "No markers yet."
+
+HOOK_INPUT2B=$(build_hook_input "$SESSION_ID2B" "$TRANSCRIPT2B" "$PROJECT_DIR2B")
+run_hook "$HOOK_INPUT2B" "$PROJECT_DIR2B"
+
+assert_eq "0" "$HOOK_STATUS" "hook exits cleanly for phase 3.5 without reviews marker"
+PHASE_STILL_35=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2B" | head -1)
+assert_eq "3.5" "$PHASE_STILL_35" "phase 3.5 does not auto-advance without reviews marker"
+assert_contains "$HOOK_OUTPUT" "reviews_complete" "prompts for reviews marker"
+
+describe "PRD phase 3.5 blocks gate decision before reviews"
+
+PROJECT_DIR2C=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2C"
+mkdir -p "$PROJECT_DIR2C/.claude" "$PROJECT_DIR2C/plans"
+
+SESSION_ID2C="gatebefore123"
+STATE_FILE2C="$PROJECT_DIR2C/.claude/prd-loop-${SESSION_ID2C}.local.md"
+cat > "$STATE_FILE2C" << EOF
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-review"
+current_phase: "3.5"
+input_type: "idea"
+input_path: ""
+input_raw: "Review feature"
+spec_path: "$PROJECT_DIR2C/plans/spec.md"
+prd_path: ""
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+cat > "$PROJECT_DIR2C/plans/spec.md" << 'EOF'
+# Spec
+## Notes
+EOF
+
+TRANSCRIPT2C="$PROJECT_DIR2C/transcript.jsonl"
+write_transcript "$TRANSCRIPT2C" "<gate_decision>PROCEED</gate_decision>"
+
+HOOK_INPUT2C=$(build_hook_input "$SESSION_ID2C" "$TRANSCRIPT2C" "$PROJECT_DIR2C")
+run_hook "$HOOK_INPUT2C" "$PROJECT_DIR2C"
+
+assert_contains "$HOOK_OUTPUT" "reviews_complete" "gate decision blocked without reviews marker"
+PHASE_STILL_35_C=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2C" | head -1)
+assert_eq "3.5" "$PHASE_STILL_35_C" "phase 3.5 remains when reviews are missing"
+REVIEWS_FLAG=$(sed -n 's/^reviews_complete: \(.*\)/\1/p' "$STATE_FILE2C" | head -1)
+assert_eq "false" "$REVIEWS_FLAG" "reviews_complete remains false when gate decision is premature"
+
+describe "PRD phase 3.5 reviews then proceed advances"
+
+PROJECT_DIR2D1=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2D1"
+mkdir -p "$PROJECT_DIR2D1/.claude" "$PROJECT_DIR2D1/plans"
+
+SESSION_ID2D1="gateflow123"
+STATE_FILE2D1="$PROJECT_DIR2D1/.claude/prd-loop-${SESSION_ID2D1}.local.md"
+cat > "$STATE_FILE2D1" << EOF
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-review"
+current_phase: "3.5"
+input_type: "idea"
+input_path: ""
+input_raw: "Review feature"
+spec_path: "$PROJECT_DIR2D1/plans/spec.md"
+prd_path: ""
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+cat > "$PROJECT_DIR2D1/plans/spec.md" << 'EOF'
+# Spec
+## Notes
+EOF
+
+TRANSCRIPT2D1="$PROJECT_DIR2D1/transcript.jsonl"
+write_transcript "$TRANSCRIPT2D1" "<reviews_complete/>"
+
+HOOK_INPUT2D1=$(build_hook_input "$SESSION_ID2D1" "$TRANSCRIPT2D1" "$PROJECT_DIR2D1")
+run_hook "$HOOK_INPUT2D1" "$PROJECT_DIR2D1"
+
+REVIEWS_FLAG_UPDATED=$(sed -n 's/^reviews_complete: \(.*\)/\1/p' "$STATE_FILE2D1" | head -1)
+assert_eq "true" "$REVIEWS_FLAG_UPDATED" "reviews_complete set after reviews marker"
+PHASE_STILL_35_D1=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2D1" | head -1)
+assert_eq "3.5" "$PHASE_STILL_35_D1" "phase remains 3.5 after reviews marker"
+
+TRANSCRIPT2D1B="$PROJECT_DIR2D1/transcript.jsonl"
+write_transcript "$TRANSCRIPT2D1B" "<gate_decision>PROCEED</gate_decision>"
+
+HOOK_INPUT2D1B=$(build_hook_input "$SESSION_ID2D1" "$TRANSCRIPT2D1B" "$PROJECT_DIR2D1")
+run_hook "$HOOK_INPUT2D1B" "$PROJECT_DIR2D1"
+
+PHASE_UPDATED_35=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2D1" | head -1)
+assert_eq "4" "$PHASE_UPDATED_35" "phase advances to 4 after gate decision"
+GATE_STATUS_UPDATED=$(sed -n 's/^gate_status: \(.*\)/\1/p' "$STATE_FILE2D1" | head -1)
+assert_eq "proceed" "$GATE_STATUS_UPDATED" "gate_status updated to proceed"
+
+describe "PRD phase 3.5 reviews then block stays"
+
+PROJECT_DIR2D2=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2D2"
+mkdir -p "$PROJECT_DIR2D2/.claude" "$PROJECT_DIR2D2/plans"
+
+SESSION_ID2D2="gateblock123"
+STATE_FILE2D2="$PROJECT_DIR2D2/.claude/prd-loop-${SESSION_ID2D2}.local.md"
+cat > "$STATE_FILE2D2" << EOF
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-review"
+current_phase: "3.5"
+input_type: "idea"
+input_path: ""
+input_raw: "Review feature"
+spec_path: "$PROJECT_DIR2D2/plans/spec.md"
+prd_path: ""
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+cat > "$PROJECT_DIR2D2/plans/spec.md" << 'EOF'
+# Spec
+## Notes
+EOF
+
+TRANSCRIPT2D2="$PROJECT_DIR2D2/transcript.jsonl"
+write_transcript "$TRANSCRIPT2D2" "<reviews_complete/>"
+
+HOOK_INPUT2D2=$(build_hook_input "$SESSION_ID2D2" "$TRANSCRIPT2D2" "$PROJECT_DIR2D2")
+run_hook "$HOOK_INPUT2D2" "$PROJECT_DIR2D2"
+
+REVIEWS_FLAG_BLOCK=$(sed -n 's/^reviews_complete: \(.*\)/\1/p' "$STATE_FILE2D2" | head -1)
+assert_eq "true" "$REVIEWS_FLAG_BLOCK" "reviews_complete set before blocking gate"
+
+TRANSCRIPT2D2B="$PROJECT_DIR2D2/transcript.jsonl"
+write_transcript "$TRANSCRIPT2D2B" "<gate_decision>BLOCK</gate_decision>"
+
+HOOK_INPUT2D2B=$(build_hook_input "$SESSION_ID2D2" "$TRANSCRIPT2D2B" "$PROJECT_DIR2D2")
+run_hook "$HOOK_INPUT2D2B" "$PROJECT_DIR2D2"
+
+PHASE_BLOCKED=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2D2" | head -1)
+assert_eq "3.5" "$PHASE_BLOCKED" "phase remains 3.5 after gate block"
+REVIEW_COUNT_BLOCKED=$(sed -n 's/^review_count: \(.*\)/\1/p' "$STATE_FILE2D2" | head -1)
+assert_eq "1" "$REVIEW_COUNT_BLOCKED" "review_count increments on block"
+GATE_STATUS_BLOCKED=$(sed -n 's/^gate_status: \(.*\)/\1/p' "$STATE_FILE2D2" | head -1)
+assert_eq "blocked" "$GATE_STATUS_BLOCKED" "gate_status updated to blocked"
+assert_contains "$HOOK_OUTPUT" "Review gate blocked" "blocked gate produces guidance"
+
+describe "PRD phase 3.2 auto-advances when implementation patterns present"
+
+PROJECT_DIR2D=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2D"
+mkdir -p "$PROJECT_DIR2D/.claude" "$PROJECT_DIR2D/plans"
+
+SESSION_ID2D="autophase32"
+STATE_FILE2D="$PROJECT_DIR2D/.claude/prd-loop-${SESSION_ID2D}.local.md"
+cat > "$STATE_FILE2D" << EOF
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-auto"
+current_phase: "3.2"
+input_type: "idea"
+input_path: ""
+input_raw: "Auto phase"
+spec_path: "$PROJECT_DIR2D/plans/spec.md"
+prd_path: ""
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+cat > "$PROJECT_DIR2D/plans/spec.md" << 'EOF'
+# Spec
+## Implementation Patterns
+- pattern
+EOF
+
+TRANSCRIPT2D="$PROJECT_DIR2D/transcript.jsonl"
+write_transcript "$TRANSCRIPT2D" "No markers yet."
+
+HOOK_INPUT2D=$(build_hook_input "$SESSION_ID2D" "$TRANSCRIPT2D" "$PROJECT_DIR2D")
+run_hook "$HOOK_INPUT2D" "$PROJECT_DIR2D"
+
+PHASE_UPDATED_32=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2D" | head -1)
+assert_eq "3.5" "$PHASE_UPDATED_32" "phase 3.2 auto-advances to 3.5"
+assert_contains "$HOOK_OUTPUT" "Auto-advanced from 3.2" "auto-advance message for phase 3.2"
+
+describe "PRD phase 4 auto-advances when prd.json exists"
+
+PROJECT_DIR2E=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2E"
+mkdir -p "$PROJECT_DIR2E/.claude" "$PROJECT_DIR2E/plans"
+
+SESSION_ID2E="autophase4"
+STATE_FILE2E="$PROJECT_DIR2E/.claude/prd-loop-${SESSION_ID2E}.local.md"
+cat > "$STATE_FILE2E" << EOF
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-auto"
+current_phase: "4"
+input_type: "idea"
+input_path: ""
+input_raw: "Auto phase"
+spec_path: "$PROJECT_DIR2E/plans/spec.md"
+prd_path: "$PROJECT_DIR2E/plans/prd.json"
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+cat > "$PROJECT_DIR2E/plans/prd.json" << 'EOF'
+{ "title": "Feature", "stories": [] }
+EOF
+
+TRANSCRIPT2E="$PROJECT_DIR2E/transcript.jsonl"
+write_transcript "$TRANSCRIPT2E" "No markers yet."
+
+HOOK_INPUT2E=$(build_hook_input "$SESSION_ID2E" "$TRANSCRIPT2E" "$PROJECT_DIR2E")
+run_hook "$HOOK_INPUT2E" "$PROJECT_DIR2E"
+
+PHASE_UPDATED_4=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2E" | head -1)
+assert_eq "5" "$PHASE_UPDATED_4" "phase 4 auto-advances to 5"
+assert_contains "$HOOK_OUTPUT" "Auto-advanced from 4" "auto-advance message for phase 4"
+
+describe "PRD phase 5 auto-advances when progress file exists"
+
+PROJECT_DIR2F=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2F"
+mkdir -p "$PROJECT_DIR2F/.claude" "$PROJECT_DIR2F/plans"
+
+SESSION_ID2F="autophase5"
+STATE_FILE2F="$PROJECT_DIR2F/.claude/prd-loop-${SESSION_ID2F}.local.md"
+cat > "$STATE_FILE2F" << EOF
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-auto"
+current_phase: "5"
+input_type: "idea"
+input_path: ""
+input_raw: "Auto phase"
+spec_path: "$PROJECT_DIR2F/plans/spec.md"
+prd_path: "$PROJECT_DIR2F/plans/prd.json"
+progress_path: "$PROJECT_DIR2F/plans/progress.txt"
+interview_questions: 0
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+printf '%s\n' "progress" > "$PROJECT_DIR2F/plans/progress.txt"
+
+TRANSCRIPT2F="$PROJECT_DIR2F/transcript.jsonl"
+write_transcript "$TRANSCRIPT2F" "No markers yet."
+
+HOOK_INPUT2F=$(build_hook_input "$SESSION_ID2F" "$TRANSCRIPT2F" "$PROJECT_DIR2F")
+run_hook "$HOOK_INPUT2F" "$PROJECT_DIR2F"
+
+PHASE_UPDATED_5=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2F" | head -1)
+assert_eq "5.5" "$PHASE_UPDATED_5" "phase 5 auto-advances to 5.5"
+assert_contains "$HOOK_OUTPUT" "Auto-advanced from 5" "auto-advance message for phase 5"
+
+describe "PRD phase 6 auto-completes when files exist"
+
+PROJECT_DIR2G=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2G"
+mkdir -p "$PROJECT_DIR2G/.claude" "$PROJECT_DIR2G/plans"
+
+SESSION_ID2G="autophase6"
+STATE_FILE2G="$PROJECT_DIR2G/.claude/prd-loop-${SESSION_ID2G}.local.md"
+cat > "$STATE_FILE2G" << EOF
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-auto"
+current_phase: "6"
+input_type: "idea"
+input_path: ""
+input_raw: "Auto phase"
+spec_path: "$PROJECT_DIR2G/plans/spec.md"
+prd_path: "$PROJECT_DIR2G/plans/prd.json"
+progress_path: "$PROJECT_DIR2G/plans/progress.txt"
+interview_questions: 0
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+retry_count: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+printf '%s\n' "spec" > "$PROJECT_DIR2G/plans/spec.md"
+printf '%s\n' '{ "title": "Feature", "stories": [] }' > "$PROJECT_DIR2G/plans/prd.json"
+printf '%s\n' "progress" > "$PROJECT_DIR2G/plans/progress.txt"
+
+TRANSCRIPT2G="$PROJECT_DIR2G/transcript.jsonl"
+write_transcript "$TRANSCRIPT2G" "No markers yet."
+
+HOOK_INPUT2G=$(build_hook_input "$SESSION_ID2G" "$TRANSCRIPT2G" "$PROJECT_DIR2G")
+run_hook "$HOOK_INPUT2G" "$PROJECT_DIR2G"
+
+[[ -f "$STATE_FILE2G" ]] && state_status="exists" || state_status="missing"
+assert_eq "missing" "$state_status" "state file removed when phase 6 auto-completes"
+
+describe "PRD stuck detection prompts recovery"
+
+PROJECT_DIR2H=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2H"
+mkdir -p "$PROJECT_DIR2H/.claude"
+
+SESSION_ID2H="recovery123"
+STATE_FILE2H="$PROJECT_DIR2H/.claude/prd-loop-${SESSION_ID2H}.local.md"
+cat > "$STATE_FILE2H" << 'EOF'
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-stuck"
+current_phase: "2"
+input_type: "idea"
+input_path: ""
+input_raw: "Stuck feature"
+spec_path: ""
+prd_path: ""
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+retry_count: 2
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+TRANSCRIPT2H="$PROJECT_DIR2H/transcript.jsonl"
+write_transcript "$TRANSCRIPT2H" "No markers yet."
+
+HOOK_INPUT2H=$(build_hook_input "$SESSION_ID2H" "$TRANSCRIPT2H" "$PROJECT_DIR2H")
+run_hook "$HOOK_INPUT2H" "$PROJECT_DIR2H"
+
+assert_contains "$HOOK_OUTPUT" "Recovery Needed" "max retries triggers recovery prompt"
+RETRY_UPDATED=$(sed -n 's/^retry_count: \(.*\)/\1/p' "$STATE_FILE2H" | head -1)
+assert_eq "3" "$RETRY_UPDATED" "retry_count increments to max"
 
 describe "Promise extraction uses last match"
 
@@ -1141,6 +1616,7 @@ prd_path: ""
 progress_path: ""
 interview_questions: 0
 max_iterations: 0
+reviews_complete: false
 gate_status: "pending"
 review_count: 0
 retry_count: 0
@@ -1473,7 +1949,7 @@ git_commit_file "$PROJECT_DIR16" "feat(feature-h): story #1 - done" "README.md" 
 
 SESSION_ID16="advance123"
 STATE_FILE16="$PROJECT_DIR16/.claude/go-loop-${SESSION_ID16}.local.md"
-write_go_prd_state "$STATE_FILE16" "$PROJECT_DIR16/plans/prd.json" "$PROJECT_DIR16/plans/spec.md" "feature-h" 1 2 1
+write_go_prd_state "$STATE_FILE16" "$PROJECT_DIR16/plans/prd.json" "$PROJECT_DIR16/plans/spec.md" "feature-h" 1 2 1 "feat/feature-h" "true"
 write_prd_two_stories "$PROJECT_DIR16/plans/prd.json" "true" "false"
 
 TRANSCRIPT16="$PROJECT_DIR16/transcript.jsonl"
@@ -1486,6 +1962,10 @@ NEXT_ID=$(sed -n 's/^current_story_id: \(.*\)/\1/p' "$STATE_FILE16" | head -1)
 assert_eq "2" "$NEXT_ID" "advances to next story"
 NEXT_ITER=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE16" | head -1)
 assert_eq "2" "$NEXT_ITER" "iteration increments on advance"
+BRANCH_PERSIST=$(sed -n 's/^working_branch: "\(.*\)"/\1/p' "$STATE_FILE16" | head -1)
+assert_eq "feat/feature-h" "$BRANCH_PERSIST" "working_branch preserved on advance"
+BRANCH_DONE=$(sed -n 's/^branch_setup_done: \(.*\)/\1/p' "$STATE_FILE16" | head -1)
+assert_eq "true" "$BRANCH_DONE" "branch_setup_done preserved on advance"
 assert_contains "$HOOK_OUTPUT" "Story #1 complete! Now on story #2" "output announces next story"
 
 describe "All stories complete removes state file"

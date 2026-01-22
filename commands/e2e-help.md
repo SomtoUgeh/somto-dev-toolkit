@@ -14,7 +14,12 @@ An iterative loop for developing Playwright E2E tests:
 2. Create page object if needed (`*.e2e.page.ts`)
 3. Write ONE focused E2E test (`*.e2e.ts`)
 4. Run tests to verify
-5. Commit and repeat
+5. **Run parallel reviews** (code-simplifier + Kieran reviewer in single message)
+6. Commit and repeat
+
+## Branch Setup
+
+When starting on main/master, setup prompts to create a feature branch (`test/e2e-coverage`).
 
 ## File Naming Convention
 

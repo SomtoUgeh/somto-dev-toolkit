@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+# Source shared helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/loop-helpers.sh
+source "$SCRIPT_DIR/lib/loop-helpers.sh"
+
 # Defaults
 MAX_ITERATIONS=0
 TEST_COMMAND=""
@@ -210,6 +215,9 @@ mkdir -p .claude
 # Read session_id from SessionStart hook (with fallback for edge cases)
 SESSION_ID=$(cat .claude/.current_session 2>/dev/null || echo "default")
 
+# Branch setup - prompt user if on main/master
+prompt_feature_branch "test/e2e-coverage"
+
 # Create progress file if it doesn't exist
 PROGRESS_FILE=".claude/e2e-progress.txt"
 if [[ ! -f "$PROGRESS_FILE" ]]; then
@@ -234,6 +242,8 @@ completion_promise: $COMPLETION_PROMISE_YAML
 progress_path: "$PROGRESS_FILE"
 e2e_folder: "$E2E_FOLDER"
 custom_prompt: "$CUSTOM_PROMPT"
+working_branch: "$WORKING_BRANCH"
+branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 

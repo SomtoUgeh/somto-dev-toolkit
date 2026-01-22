@@ -60,7 +60,7 @@ qmd status
 echo ""
 
 # Count documents
-doc_count=$(find "$SESSIONS_DIR" -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+doc_count=$(find "$SESSIONS_DIR" -name "*.md" 2>/dev/null | wc -l | LC_ALL=C tr -d ' ')
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✓ qmd session indexing ready!"

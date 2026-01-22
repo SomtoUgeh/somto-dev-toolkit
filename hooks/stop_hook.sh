@@ -49,6 +49,10 @@
 
 set -euo pipefail
 
+# Force byte-wise locale to avoid macOS "Illegal byte sequence" in tr/sed on non-UTF8 bytes.
+export LC_ALL=C
+export LANG=C
+
 # Fallback safety limit - prevents runaway loops even if max_iterations not set
 FALLBACK_MAX_ITERATIONS=100
 
@@ -118,7 +122,8 @@ extract_regex_last() {
 extract_promise_last() {
   local text="$1"
   local normalized
-  normalized=$(printf '%s' "$text" | tr '\r\n' ' ')
+  # LC_ALL=C prevents "Illegal byte sequence" on macOS with non-ASCII input
+  normalized=$(printf '%s' "$text" | LC_ALL=C tr '\r\n' ' ')
   normalized=$(printf '%s' "$normalized" | sed 's/[[:space:]]\+/ /g')
   local promise
   promise=$(extract_regex_last "$normalized" '<promise>([^<]*)</promise>')
@@ -241,7 +246,7 @@ show_loop_summary() {
   # Get commit count since loop started
   local commit_count=0
   if [[ -n "$started_at" ]] && git rev-parse --git-dir >/dev/null 2>&1; then
-    commit_count=$(git log --since="$started_at" --oneline 2>/dev/null | wc -l | tr -d ' ')
+    commit_count=$(git log --since="$started_at" --oneline 2>/dev/null | wc -l | LC_ALL=C tr -d ' ')
   fi
 
   echo ""
@@ -333,7 +338,7 @@ index_session_for_qmd() {
   [[ -z "$project_path" ]] && return 0
 
   # Derive session file path
-  local project_dir_name="-$(echo "$project_path" | tr '/' '-')"
+  local project_dir_name="-$(echo "$project_path" | LC_ALL=C tr '/' '-')"
   local session_file="$HOME/.claude/projects/$project_dir_name/${SESSION_ID}.jsonl"
   [[ -f "$session_file" ]] || return 0
 
@@ -407,7 +412,7 @@ get_field() {
   local frontmatter="$1"
   local field="$2"
   # Use head -1 to handle duplicate keys (return first occurrence only)
-  echo "$frontmatter" | grep "^${field}:" | head -1 | sed "s/${field}: *//" | tr -d '"' || true
+  echo "$frontmatter" | grep "^${field}:" | head -1 | sed "s/${field}: *//" | LC_ALL=C tr -d '"' || true
 }
 
 # Validate PRD phase values (shared)
@@ -643,12 +648,14 @@ if [[ "$ACTIVE_LOOP" == "prd" ]]; then
   INTERVIEW_QUESTIONS=$(get_field "$FRONTMATTER" "interview_questions")
   GATE_STATUS=$(get_field "$FRONTMATTER" "gate_status")
   REVIEW_COUNT=$(get_field "$FRONTMATTER" "review_count")
+  REVIEWS_COMPLETE=$(get_field "$FRONTMATTER" "reviews_complete")
   RETRY_COUNT=$(get_field "$FRONTMATTER" "retry_count")
 
   # Default numeric fields
   [[ ! "$INTERVIEW_QUESTIONS" =~ ^[0-9]+$ ]] && INTERVIEW_QUESTIONS=0
   [[ ! "$REVIEW_COUNT" =~ ^[0-9]+$ ]] && REVIEW_COUNT=0
   [[ ! "$RETRY_COUNT" =~ ^[0-9]+$ ]] && RETRY_COUNT=0
+  [[ "$REVIEWS_COMPLETE" != "true" ]] && REVIEWS_COMPLETE="false"
 
   # Max retries before asking user for help
   MAX_RETRIES=3
@@ -660,6 +667,7 @@ if [[ "$ACTIVE_LOOP" == "prd" ]]; then
   GATE_DECISION=""
   MARKER_NEXT=""
   INVALID_NEXT_REASON=""
+  REVIEWS_COMPLETE_MARKER=""
 
   if [[ -n "$LAST_OUTPUT" ]]; then
     # Use extract_regex_last to get the LAST occurrence (markers may appear in examples/docs)
@@ -673,6 +681,9 @@ if [[ "$ACTIVE_LOOP" == "prd" ]]; then
 
     # <gate_decision>PROCEED|BLOCK</gate_decision>
     GATE_DECISION=$(extract_regex_last "$LAST_OUTPUT" '<gate_decision>([^<]+)</gate_decision>')
+
+    # <reviews_complete/>
+    REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
   fi
 
   # Validate next phase value from marker (if provided)
@@ -955,8 +966,12 @@ Read the spec first, then pass content to each reviewer.
 - Add critical items to spec's \"Review Findings\" section
 - Update User Stories if reviewers found missing flows
 - Prioritize findings by severity (Critical > High > Medium)
+- Output reviews marker:
+\`\`\`
+<reviews_complete/>
+\`\`\`
 
-**Gate Decision:**
+**Gate Decision (after reviews marker):**
 If critical security/architecture issues found, use AskUserQuestion:
 \"Reviewers found <issues>. Address now or proceed to PRD generation?\"
 
@@ -1129,7 +1144,13 @@ After user responds, output:
   EXPECTED_MARKER=""
   case "$CURRENT_PHASE" in
     "5.5") EXPECTED_MARKER="<max_iterations>N</max_iterations>" ;;
-    "3.5") EXPECTED_MARKER="<gate_decision>PROCEED|BLOCK</gate_decision>" ;;
+    "3.5")
+      if [[ "$REVIEWS_COMPLETE" == "true" ]]; then
+        EXPECTED_MARKER="<gate_decision>PROCEED|BLOCK</gate_decision>"
+      else
+        EXPECTED_MARKER="<reviews_complete/>"
+      fi
+      ;;
     *)     EXPECTED_MARKER="<phase_complete phase=\"$CURRENT_PHASE\" .../>" ;;
   esac
 
@@ -1142,7 +1163,11 @@ After user responds, output:
       [[ -n "$MAX_ITER_TAG" ]] && VALID_MARKER_FOUND=true
       ;;
     "3.5")
-      [[ -n "$GATE_DECISION" ]] && VALID_MARKER_FOUND=true
+      if [[ -n "$REVIEWS_COMPLETE_MARKER" ]]; then
+        VALID_MARKER_FOUND=true
+      elif [[ "$REVIEWS_COMPLETE" == "true" ]] && [[ "$GATE_DECISION" == "PROCEED" || "$GATE_DECISION" == "BLOCK" ]]; then
+        VALID_MARKER_FOUND=true
+      fi
       ;;
     *)
       # Only valid if phase attribute matches current phase
@@ -1156,7 +1181,184 @@ After user responds, output:
       sed_inplace "s/^retry_count: .*/retry_count: 0/" "$STATE_FILE"
       sed_inplace "s/^last_error: .*/last_error: \"\"/" "$STATE_FILE"
     fi
-  else
+  fi
+
+  # Update feature name ONLY from phase 1 marker (input classification)
+  # Restricting to phase 1 prevents stray examples from mutating state in later phases
+  if [[ -n "$PHASE_FEATURE" ]] && [[ "$CURRENT_PHASE" == "1" ]] && [[ "$PHASE_COMPLETE" == "1" ]]; then
+    FEATURE_NAME="$PHASE_FEATURE"
+  fi
+
+
+  # Handle phase transitions
+  NEXT_PHASE=""
+  SYSTEM_MSG=""
+
+  # Phase 5.5: max_iterations tag detected
+  if [[ -n "$MAX_ITER_TAG" ]] && [[ "$CURRENT_PHASE" == "5.5" ]]; then
+    NEXT_PHASE="6"
+    # Update max_iterations in state (for phase 6 prompt generation)
+    sed_inplace "s/^max_iterations: .*/max_iterations: $MAX_ITER_TAG/" "$STATE_FILE"
+    MAX_ITERATIONS="$MAX_ITER_TAG"
+    SYSTEM_MSG="✅ Loop (prd): Phase 5.5 complete! max_iterations=$MAX_ITER_TAG. Advancing to phase 6."
+  fi
+
+  # Phase 3.5: reviews_complete required before gate decision
+  if [[ "$CURRENT_PHASE" == "3.5" ]]; then
+    if [[ -n "$REVIEWS_COMPLETE_MARKER" ]]; then
+      if grep -q '^reviews_complete:' "$STATE_FILE"; then
+        sed_inplace "s/^reviews_complete: .*/reviews_complete: true/" "$STATE_FILE"
+      else
+        sed_inplace "2i\\
+reviews_complete: true" "$STATE_FILE"
+      fi
+      REVIEWS_COMPLETE="true"
+      if [[ $RETRY_COUNT -gt 0 ]]; then
+        sed_inplace "s/^retry_count: .*/retry_count: 0/" "$STATE_FILE"
+        sed_inplace "s/^last_error: .*/last_error: \"\"/" "$STATE_FILE"
+      fi
+      SYSTEM_MSG="✅ Loop (prd): Reviews complete. Output <gate_decision>PROCEED</gate_decision> or <gate_decision>BLOCK</gate_decision>."
+      PROMPT_TEXT=$(generate_prd_phase_prompt "3.5")
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
+
+    if [[ -n "$GATE_DECISION" ]]; then
+      if [[ "$REVIEWS_COMPLETE" != "true" ]]; then
+        SYSTEM_MSG="⚠️  Loop (prd): Gate decision requires reviews first. Output <reviews_complete/> before <gate_decision>."
+        PROMPT_TEXT=$(generate_prd_phase_prompt "3.5")
+        jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+        exit 0
+      fi
+
+      if [[ "$GATE_DECISION" == "PROCEED" ]]; then
+        NEXT_PHASE="4"
+        sed_inplace "s/^gate_status: .*/gate_status: proceed/" "$STATE_FILE"
+        SYSTEM_MSG="✅ Loop (prd): Review gate passed! Advancing to phase 4."
+      elif [[ "$GATE_DECISION" == "BLOCK" ]]; then
+        # Stay on phase 3.5, user needs to address issues
+        REVIEW_COUNT=$((REVIEW_COUNT + 1))
+        sed_inplace "s/^review_count: .*/review_count: $REVIEW_COUNT/" "$STATE_FILE"
+        sed_inplace "s/^gate_status: .*/gate_status: blocked/" "$STATE_FILE"
+        SYSTEM_MSG="⚠️  Loop (prd): Review gate blocked. Address issues then output <gate_decision>PROCEED</gate_decision>"
+        # Continue without advancing
+        PROMPT_TEXT=$(generate_prd_phase_prompt "3.5")
+        jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+        exit 0
+      fi
+    fi
+  fi
+
+  # Generic phase completion
+  # IMPORTANT: Validate that phase attribute matches current phase to prevent
+  # accidental advancement from example markers in documentation/output
+  if [[ -n "$PHASE_COMPLETE" ]] && [[ "$PHASE_COMPLETE" == "$CURRENT_PHASE" ]] && [[ "$CURRENT_PHASE" != "3.5" ]] && [[ -z "$INVALID_NEXT_REASON" ]]; then
+    # Determine next phase based on current phase
+    case "$CURRENT_PHASE" in
+      "1") NEXT_PHASE="${MARKER_NEXT:-2}" ;;
+      "2")
+        if [[ "$MARKER_NEXT" == "2.5" ]]; then
+          NEXT_PHASE="2.5"
+        elif [[ "$MARKER_NEXT" == "3" ]]; then
+          NEXT_PHASE="3"
+        else
+          NEXT_PHASE="2.5"  # Default to research after wave 1
+        fi
+        ;;
+      "2.5") NEXT_PHASE="${MARKER_NEXT:-2}" ;;  # Back to interview
+      "3")
+        NEXT_PHASE="3.2"
+        # Extract spec_path from marker
+        MARKER_SPEC=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*spec_path="([^"]+)"')
+        if [[ -n "$MARKER_SPEC" ]]; then
+          SPEC_PATH="$MARKER_SPEC"
+          ESCAPED_PATH=$(escape_sed_replacement "$SPEC_PATH")
+          sed_inplace "s|^spec_path: .*|spec_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
+        fi
+        ;;
+      "3.2") NEXT_PHASE="3.5" ;;  # Skill enrichment → Review gate
+      "4")
+        NEXT_PHASE="5"
+        # Extract prd_path from marker
+        MARKER_PRD=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*prd_path="([^"]+)"')
+        if [[ -n "$MARKER_PRD" ]]; then
+          PRD_PATH="$MARKER_PRD"
+          ESCAPED_PATH=$(escape_sed_replacement "$PRD_PATH")
+          sed_inplace "s|^prd_path: .*|prd_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
+        fi
+        ;;
+      "5")
+        NEXT_PHASE="5.5"
+        # Extract progress_path from marker
+        MARKER_PROGRESS=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*progress_path="([^"]+)"')
+        if [[ -n "$MARKER_PROGRESS" ]]; then
+          ESCAPED_PATH=$(escape_sed_replacement "$MARKER_PROGRESS")
+          sed_inplace "s|^progress_path: .*|progress_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
+        fi
+        ;;
+      "5.5") NEXT_PHASE="6" ;;
+      "6")
+        # PRD complete!
+        echo "✅ Loop (prd): All phases complete! PRD ready."
+        notify "Loop (prd)" "PRD complete for $FEATURE_NAME!"
+        rm "$STATE_FILE"
+        exit 0
+        ;;
+    esac
+    if [[ -n "$NEXT_PHASE" ]]; then
+      SYSTEM_MSG="✅ Loop (prd): Phase $CURRENT_PHASE complete! Advancing to phase $NEXT_PHASE."
+    fi
+  fi
+
+  # =============================================================================
+  # FALLBACK DETECTION: Auto-advance when work is done but marker is missing
+  # This prevents loops where Claude completes work but forgets the marker
+  # =============================================================================
+  if [[ -z "$NEXT_PHASE" ]] && [[ -z "$INVALID_NEXT_REASON" ]]; then
+    case "$CURRENT_PHASE" in
+      "3.2")
+        # Check if spec has Implementation Patterns section
+        if [[ -n "$SPEC_PATH" ]] && [[ -f "$SPEC_PATH" ]] && grep -q "## Implementation Patterns" "$SPEC_PATH" 2>/dev/null; then
+          echo "⚠️  Loop (prd): Phase 3.2 work detected (spec has Implementation Patterns). Auto-advancing to 3.5." >&2
+          NEXT_PHASE="3.5"
+          SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 3.2→3.5 (marker missing but work done)"
+        fi
+        ;;
+      "4")
+        # Check if PRD JSON file exists
+        if [[ -n "$PRD_PATH" ]] && [[ -f "$PRD_PATH" ]] && jq empty "$PRD_PATH" 2>/dev/null; then
+          echo "⚠️  Loop (prd): Phase 4 work detected (PRD file exists). Auto-advancing to 5." >&2
+          NEXT_PHASE="5"
+          SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 4→5 (marker missing but PRD exists)"
+        fi
+        ;;
+      "5")
+        # Check if progress file exists
+        progress_path_check=$(get_field "$FRONTMATTER" "progress_path")
+        if [[ -n "$progress_path_check" ]] && [[ -f "$progress_path_check" ]]; then
+          echo "⚠️  Loop (prd): Phase 5 work detected (progress file exists). Auto-advancing to 5.5." >&2
+          NEXT_PHASE="5.5"
+          SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 5→5.5 (marker missing but progress file exists)"
+        fi
+        ;;
+      "6")
+        # Phase 6 is just presentation - if all files exist, PRD is complete
+        prd_check=$(get_field "$FRONTMATTER" "prd_path")
+        spec_check=$(get_field "$FRONTMATTER" "spec_path")
+        progress_check=$(get_field "$FRONTMATTER" "progress_path")
+        if [[ -n "$prd_check" ]] && [[ -f "$prd_check" ]] && \
+           [[ -n "$spec_check" ]] && [[ -f "$spec_check" ]] && \
+           [[ -n "$progress_check" ]] && [[ -f "$progress_check" ]]; then
+          echo "✅ Loop (prd): Phase 6 - All PRD files exist. Completing loop." >&2
+          notify "Loop (prd)" "PRD complete for $FEATURE_NAME!"
+          rm "$STATE_FILE"
+          exit 0
+        fi
+        ;;
+    esac
+  fi
+
+  if [[ -z "$NEXT_PHASE" ]] && [[ "$VALID_MARKER_FOUND" != "true" ]]; then
     # No valid marker found - increment retry count
     RETRY_COUNT=$((RETRY_COUNT + 1))
     sed_inplace "s/^retry_count: .*/retry_count: $RETRY_COUNT/" "$STATE_FILE"
@@ -1165,7 +1367,7 @@ After user responds, output:
     if [[ -n "$INVALID_NEXT_REASON" ]]; then
       ERROR_SUMMARY="$INVALID_NEXT_REASON"
     elif [[ -n "$LAST_OUTPUT" ]]; then
-      ERROR_SUMMARY=$(echo "$LAST_OUTPUT" | head -c 200 | tr '\n' ' ' | sed 's/"/\\"/g')
+      ERROR_SUMMARY=$(echo "$LAST_OUTPUT" | head -c 200 | LC_ALL=C tr '\n' ' ' | sed 's/"/\\"/g')
     else
       ERROR_SUMMARY="No text output from Claude (only tool calls)"
     fi
@@ -1238,115 +1440,11 @@ $(generate_prd_phase_prompt "$CURRENT_PHASE")"
     fi
   fi
 
-  # Update feature name ONLY from phase 1 marker (input classification)
-  # Restricting to phase 1 prevents stray examples from mutating state in later phases
-  if [[ -n "$PHASE_FEATURE" ]] && [[ "$CURRENT_PHASE" == "1" ]] && [[ "$PHASE_COMPLETE" == "1" ]]; then
-    FEATURE_NAME="$PHASE_FEATURE"
-  fi
-
-
-  # Handle phase transitions
-  NEXT_PHASE=""
-  SYSTEM_MSG=""
-
-  # Phase 5.5: max_iterations tag detected
-  if [[ -n "$MAX_ITER_TAG" ]] && [[ "$CURRENT_PHASE" == "5.5" ]]; then
-    NEXT_PHASE="6"
-    # Update max_iterations in state (for phase 6 prompt generation)
-    sed_inplace "s/^max_iterations: .*/max_iterations: $MAX_ITER_TAG/" "$STATE_FILE"
-    MAX_ITERATIONS="$MAX_ITER_TAG"
-    SYSTEM_MSG="✅ Loop (prd): Phase 5.5 complete! max_iterations=$MAX_ITER_TAG. Advancing to phase 6."
-  fi
-
-  # Phase 3.5: gate decision detected
-  if [[ -n "$GATE_DECISION" ]] && [[ "$CURRENT_PHASE" == "3.5" ]]; then
-    if [[ "$GATE_DECISION" == "PROCEED" ]]; then
-      NEXT_PHASE="4"
-      sed_inplace "s/^gate_status: .*/gate_status: proceed/" "$STATE_FILE"
-      SYSTEM_MSG="✅ Loop (prd): Review gate passed! Advancing to phase 4."
-    elif [[ "$GATE_DECISION" == "BLOCK" ]]; then
-      # Stay on phase 3.5, user needs to address issues
-      REVIEW_COUNT=$((REVIEW_COUNT + 1))
-      sed_inplace "s/^review_count: .*/review_count: $REVIEW_COUNT/" "$STATE_FILE"
-      sed_inplace "s/^gate_status: .*/gate_status: blocked/" "$STATE_FILE"
-      SYSTEM_MSG="⚠️  Loop (prd): Review gate blocked. Address issues then output <gate_decision>PROCEED</gate_decision>"
-      # Continue without advancing
-      PROMPT_TEXT=$(generate_prd_phase_prompt "3.5")
-      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-      exit 0
-    fi
-  fi
-
-  # Generic phase completion
-  # IMPORTANT: Validate that phase attribute matches current phase to prevent
-  # accidental advancement from example markers in documentation/output
-  if [[ -n "$PHASE_COMPLETE" ]] && [[ "$PHASE_COMPLETE" == "$CURRENT_PHASE" ]]; then
-    # Determine next phase based on current phase
-    case "$CURRENT_PHASE" in
-      "1") NEXT_PHASE="${MARKER_NEXT:-2}" ;;
-      "2")
-        if [[ "$MARKER_NEXT" == "2.5" ]]; then
-          NEXT_PHASE="2.5"
-        elif [[ "$MARKER_NEXT" == "3" ]]; then
-          NEXT_PHASE="3"
-        else
-          NEXT_PHASE="2.5"  # Default to research after wave 1
-        fi
-        ;;
-      "2.5") NEXT_PHASE="${MARKER_NEXT:-2}" ;;  # Back to interview
-      "3")
-        NEXT_PHASE="3.2"
-        # Extract spec_path from marker
-        MARKER_SPEC=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*spec_path="([^"]+)"')
-        if [[ -n "$MARKER_SPEC" ]]; then
-          SPEC_PATH="$MARKER_SPEC"
-          ESCAPED_PATH=$(escape_sed_replacement "$SPEC_PATH")
-          sed_inplace "s|^spec_path: .*|spec_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
-        fi
-        ;;
-      "3.2") NEXT_PHASE="3.5" ;;  # Skill enrichment → Review gate
-      "3.5") NEXT_PHASE="4" ;;  # Only reached if gate_decision not detected
-      "4")
-        NEXT_PHASE="5"
-        # Extract prd_path from marker
-        MARKER_PRD=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*prd_path="([^"]+)"')
-        if [[ -n "$MARKER_PRD" ]]; then
-          PRD_PATH="$MARKER_PRD"
-          ESCAPED_PATH=$(escape_sed_replacement "$PRD_PATH")
-          sed_inplace "s|^prd_path: .*|prd_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
-        fi
-        ;;
-      "5")
-        NEXT_PHASE="5.5"
-        # Extract progress_path from marker
-        MARKER_PROGRESS=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*progress_path="([^"]+)"')
-        if [[ -n "$MARKER_PROGRESS" ]]; then
-          ESCAPED_PATH=$(escape_sed_replacement "$MARKER_PROGRESS")
-          sed_inplace "s|^progress_path: .*|progress_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
-        fi
-        ;;
-      "5.5") NEXT_PHASE="6" ;;
-      "6")
-        # PRD complete!
-        echo "✅ Loop (prd): All phases complete! PRD ready."
-        notify "Loop (prd)" "PRD complete for $FEATURE_NAME!"
-        rm "$STATE_FILE"
-        exit 0
-        ;;
-    esac
-    SYSTEM_MSG="✅ Loop (prd): Phase $CURRENT_PHASE complete! Advancing to phase $NEXT_PHASE."
-  fi
-
-  # If no phase transition detected, continue current phase
-  if [[ -z "$NEXT_PHASE" ]]; then
-    SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE continuing..."
-    PROMPT_TEXT=$(generate_prd_phase_prompt "$CURRENT_PHASE")
-    jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-    exit 0
-  fi
-
   # Update state file with new phase
   sed_inplace "s/^current_phase: .*/current_phase: \"$NEXT_PHASE\"/" "$STATE_FILE"
+
+  # Reset retry counter on successful phase transition
+  sed_inplace "s/^retry_count: .*/retry_count: 0/" "$STATE_FILE"
 
   # Update feature_name if changed (escape for sed to handle special chars)
   ESCAPED_FEATURE=$(escape_sed_replacement "$FEATURE_NAME")
@@ -1434,7 +1532,12 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
       PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
 
       if [[ "$CURRENT_PASSES" != "true" ]]; then
-        SYSTEM_MSG="🔄 Loop (go/prd): Story #$CURRENT_STORY_ID not yet passing. Update prd.json when tests pass."
+        SYSTEM_MSG="🔄 Loop (go/prd): Story #$CURRENT_STORY_ID not yet passing.
+
+**When verification steps pass, update prd.json:**
+Edit \`$PRD_PATH\` → find story id:$CURRENT_STORY_ID → set \"passes\": true
+
+Then run reviews and output markers."
       elif [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
         SYSTEM_MSG="⚠️  Loop (go/prd): Story #$CURRENT_STORY_ID passes but REVIEWS NOT run.
 
@@ -1468,8 +1571,26 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
 
     # Step 3: Verify prd.json shows passes: true
     if [[ "$CURRENT_PASSES" != "true" ]]; then
-      PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-      SYSTEM_MSG="⚠️  Loop (go/prd): <story_complete/> found but prd.json shows passes: false. Update prd.json first."
+      PROMPT_TEXT="**BLOCKED: prd.json not updated**
+
+You output \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\` but prd.json still shows \`passes: false\` for story #$CURRENT_STORY_ID.
+
+**Fix with this exact edit:**
+\`\`\`
+File: $PRD_PATH
+Find story with id: $CURRENT_STORY_ID
+Change: \"passes\": false
+To:     \"passes\": true
+\`\`\`
+
+Or use jq:
+\`\`\`bash
+jq '(.stories[] | select(.id == $CURRENT_STORY_ID)) .passes = true' \"$PRD_PATH\" > tmp.json && mv tmp.json \"$PRD_PATH\"
+\`\`\`
+
+After updating prd.json, output the marker again:
+\`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
+      SYSTEM_MSG="⚠️  Loop (go/prd): prd.json shows passes: false. Update it first, then re-output story_complete marker."
       jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
       exit 0
     fi
@@ -1518,13 +1639,16 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
         SKILL_FRONTMATTER=""
         SKILL_SECTION=""
         SKILLS_LOG=""
+        WORKING_BRANCH=$(get_field "$FRONTMATTER" "working_branch")
+        BRANCH_SETUP_DONE=$(get_field "$FRONTMATTER" "branch_setup_done")
+        BRANCH_FRONTMATTER=""
 
         if [[ -n "$NEXT_SKILLS_JSON" ]] && [[ "$NEXT_SKILLS_JSON" != "null" ]]; then
           # New format: skills array
           SKILLS_LIST=$(echo "$NEXT_SKILLS_JSON" | jq -r '.[]' 2>/dev/null || echo "")
           if [[ -n "$SKILLS_LIST" ]]; then
             SKILL_FRONTMATTER="skills: $NEXT_SKILLS_JSON"
-            SKILLS_LOG=$(echo "$SKILLS_LIST" | tr '\n' ',' | sed 's/,$//')
+            SKILLS_LOG=$(echo "$SKILLS_LIST" | LC_ALL=C tr '\n' ',' | sed 's/,$//')
             SKILL_SECTION="## Required Skills
 
 This story requires the following skills. **BEFORE implementing**, load each:
@@ -1556,6 +1680,19 @@ Follow the skill's guidance for implementation approach, patterns, and quality s
 "
         fi
 
+        if [[ -n "$WORKING_BRANCH" ]]; then
+          WORKING_BRANCH=${WORKING_BRANCH//\"/\\\"}
+          BRANCH_FRONTMATTER="working_branch: \"$WORKING_BRANCH\""
+        fi
+        if [[ -n "$BRANCH_SETUP_DONE" ]]; then
+          if [[ -n "$BRANCH_FRONTMATTER" ]]; then
+            BRANCH_FRONTMATTER="$BRANCH_FRONTMATTER
+branch_setup_done: $BRANCH_SETUP_DONE"
+          else
+            BRANCH_FRONTMATTER="branch_setup_done: $BRANCH_SETUP_DONE"
+          fi
+        fi
+
         if [[ -f "$PROGRESS_PATH" ]]; then
           if [[ -n "$SKILLS_LOG" ]]; then
             echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$NEXT_STORY_ID,\"status\":\"STARTED\",\"skills\":\"$SKILLS_LOG\",\"notes\":\"Beginning story #$NEXT_STORY_ID (requires skills)\"}" >> "$PROGRESS_PATH"
@@ -1578,6 +1715,10 @@ total_stories: $TOTAL_STORIES"
         if [[ -n "$SKILL_FRONTMATTER" ]]; then
           FRONTMATTER_CONTENT="$FRONTMATTER_CONTENT
 $SKILL_FRONTMATTER"
+        fi
+        if [[ -n "$BRANCH_FRONTMATTER" ]]; then
+          FRONTMATTER_CONTENT="$FRONTMATTER_CONTENT
+$BRANCH_FRONTMATTER"
         fi
         FRONTMATTER_CONTENT="$FRONTMATTER_CONTENT
 iteration: $NEXT_ITERATION
@@ -1623,8 +1764,11 @@ ${SKILL_SECTION}## Your Task
 3. Follow the verification steps listed in the story
 4. Write/update tests next to the code they test
 5. Run: format, lint, tests, types (all must pass)
-6. Update \`$PRD_PATH\`: set \`passes = true\` for story $NEXT_STORY_ID
-7. Commit with appropriate type: \`<type>($FEATURE_NAME): story #$NEXT_STORY_ID - $NEXT_TITLE\`
+6. **Update \`$PRD_PATH\`**: set \`passes: true\` for story $NEXT_STORY_ID
+7. **Commit** with type: \`<type>($FEATURE_NAME): story #$NEXT_STORY_ID - $NEXT_TITLE\`
+8. Output markers: \`<reviews_complete/>\` then \`<story_complete story_id=\"$NEXT_STORY_ID\"/>\`
+
+**Hook handles automatically:** progress.txt logging (don't touch it)
 
 CRITICAL: Only mark the story as passing when it genuinely passes all verification steps."
 
@@ -1640,12 +1784,27 @@ CRITICAL: Only mark the story as passing when it genuinely passes all verificati
           '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
         exit 0
       else
-        # Story passes but no commit - remind to commit
+        # Story passes but no commit - remind to commit with exact command
         NEXT_ITERATION=$((ITERATION + 1))
         update_iteration "$STATE_FILE" "$NEXT_ITERATION"
 
-        PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-        SYSTEM_MSG="⚠️  Loop (go/prd): Story #$CURRENT_STORY_ID passes but NO COMMIT found. Commit: feat($FEATURE_NAME): story #$CURRENT_STORY_ID"
+        PROMPT_TEXT="**BLOCKED: No commit found for story #$CURRENT_STORY_ID**
+
+All checks pass except commit verification. The hook scans the last 10 commits for a reference to story #$CURRENT_STORY_ID.
+
+**Create commit with this format:**
+\`\`\`bash
+git add -A && git commit -m \"feat($FEATURE_NAME): story #$CURRENT_STORY_ID - $STORY_TITLE\"
+\`\`\`
+
+**Required patterns (any of these work):**
+- \`story #$CURRENT_STORY_ID\`
+- \`#$CURRENT_STORY_ID\` (with word boundary)
+- \`story $CURRENT_STORY_ID\`
+
+After committing, output:
+\`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
+        SYSTEM_MSG="⚠️  Loop (go/prd): Story passes ✓ Reviews done ✓ NO COMMIT found. See prompt for exact command."
 
         jq -n \
           --arg prompt "$PROMPT_TEXT" \

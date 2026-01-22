@@ -175,7 +175,7 @@ process_single_session() {
   project_name=$(get_project_name "$SINGLE_PROJECT")
 
   # Try to find session in index for metadata
-  local project_dir_name="-$(echo "$SINGLE_PROJECT" | tr '/' '-')"
+  local project_dir_name="-$(echo "$SINGLE_PROJECT" | LC_ALL=C tr '/' '-')"
   local index_file="$PROJECTS_DIR/$project_dir_name/sessions-index.json"
 
   if [[ -f "$index_file" ]]; then

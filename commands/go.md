@@ -58,6 +58,17 @@ Read the generated state file (path shown in setup output) and begin work.
 
 ---
 
+## Branch Setup (Handled by Setup Script)
+
+When starting on main/master, the setup script prompts:
+1. "Create a feature branch?" [1/2]
+2. If yes, prompts for branch name with suggested default
+3. Creates branch before loop starts
+
+This happens in bash before Claude starts working.
+
+---
+
 ## Structured Output Control Flow
 
 The stop hook parses your output for specific XML markers. **You MUST output the exact marker format** to advance. Missing or invalid markers block progression with guidance.
@@ -105,28 +116,39 @@ The hook validates this EXACT sequence before advancing to next story:
 
 ---
 
-## MANDATORY Pre-Commit Reviews
+## MANDATORY Pre-Commit Reviews (PARALLEL)
 
 **REQUIRED**: You MUST run these agents before EVERY commit. No exceptions. Do not skip.
 
-1. **ALWAYS run code-simplifier first**: `pr-review-toolkit:code-simplifier` (max_turns: 15)
-   - Simplifies and cleans your changes
-   - Address ALL suggestions before proceeding
+### Launch ALL Reviewers IN PARALLEL (Single Message)
 
-2. **ALWAYS run the appropriate Kieran reviewer** (all max_turns: 20):
-   - **TypeScript/JavaScript**: `compound-engineering:review:kieran-typescript-reviewer`
-   - **Python**: `compound-engineering:review:kieran-python-reviewer`
-   - **Ruby/Rails**: `compound-engineering:review:kieran-rails-reviewer`
-   - **Database/migrations/data models**: `compound-engineering:review:data-integrity-guardian`
+In ONE message, spawn multiple Task tool calls:
 
-3. **Address ALL review findings** before committing
+```
+Task 1: subagent_type="pr-review-toolkit:code-simplifier" (max_turns: 15)
+Task 2: subagent_type="<appropriate-kieran-reviewer>" (max_turns: 20)
+```
 
-4. **Output reviews marker** after addressing all findings:
+**Kieran reviewer by language:**
+- **TypeScript/JavaScript**: `compound-engineering:review:kieran-typescript-reviewer`
+- **Python**: `compound-engineering:review:kieran-python-reviewer`
+- **Ruby/Rails**: `compound-engineering:review:kieran-rails-reviewer`
+
+**Add if applicable:**
+- **Database/migrations**: `compound-engineering:review:data-integrity-guardian`
+- **Frontend races**: `compound-engineering:review:julik-frontend-races-reviewer`
+
+All agents run in parallel → results return together → faster reviews.
+
+### After Reviews Complete
+
+1. **Address ALL findings** from all reviewers
+2. **Output reviews marker**:
    ```xml
    <reviews_complete/>
    ```
-
-5. **Commit** with story reference, then output completion marker:
+3. **Commit** with story reference
+4. **Output completion marker**:
    ```xml
    <story_complete story_id="N"/>
    ```
@@ -136,14 +158,19 @@ The hook validates this EXACT sequence before advancing to next story:
 ```
 # 1. Implement the story
 # 2. Update prd.json: set passes: true for story 1
-# 3. Run reviewers
+
+# 3. Run reviewers IN PARALLEL (single message, multiple Task calls)
 Task(subagent_type="pr-review-toolkit:code-simplifier", max_turns: 15)
 Task(subagent_type="compound-engineering:review:kieran-typescript-reviewer", max_turns: 20)
-# 4. Address findings
+# Both run simultaneously, results return together
+
+# 4. Address ALL findings from both reviewers
 # 5. Output reviews marker
 <reviews_complete/>
+
 # 6. Commit
 git commit -m "feat(auth): story #1 - implement login form"
+
 # 7. Output story completion
 <story_complete story_id="1"/>
 ```

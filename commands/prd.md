@@ -19,6 +19,17 @@ You are now in a phased PRD workflow. The stop hook advances you through phases 
 
 ---
 
+## Branch Setup (Handled by Setup Script)
+
+When starting on main/master, the setup script prompts:
+1. "Create a feature branch?" [1/2]
+2. If yes, prompts for branch name (default: `feat/<feature-name>`)
+3. Creates branch before loop starts
+
+This happens in bash before Claude starts working.
+
+---
+
 ## Structured Output Control Flow
 
 The hook parses your output for specific XML markers. **You MUST output the exact marker format** for your current phase to advance. Invalid or missing markers trigger retry with guidance.
@@ -32,7 +43,7 @@ The hook parses your output for specific XML markers. **You MUST output the exac
 | 2.5 | Research | `<phase_complete phase="2.5"/>` | `next` (required: "2") | 2 |
 | 3 | Spec Write | `<phase_complete phase="3"/>` | `spec_path` (required) | 3.2 |
 | 3.2 | Skill Enrichment | `<phase_complete phase="3.2"/>` | none | 3.5 |
-| 3.5 | Review Gate | `<gate_decision>` | PROCEED or BLOCK | 4 (if PROCEED) |
+| 3.5 | Review Gate | `<reviews_complete/>` then `<gate_decision>` | PROCEED or BLOCK | 4 (if PROCEED) |
 | 4 | PRD Generation | `<phase_complete phase="4"/>` | `prd_path` (required) | 5 |
 | 5 | Progress File | `<phase_complete phase="5"/>` | `progress_path` (required) | 5.5 |
 | 5.5 | Complexity | `<max_iterations>` | integer N | 6 |
@@ -43,7 +54,8 @@ The hook parses your output for specific XML markers. **You MUST output the exac
 1. **phase attribute must match current phase** - `<phase_complete phase="3"/>` when in phase 2 is ignored
 2. **Last marker wins** - If docs/examples contain markers, only the LAST occurrence counts
 3. **next attribute validated** - Phase 1→only 2, Phase 2→only 2.5 or 3, Phase 2.5→only 2
-4. **Retry on invalid** - Wrong marker increments `retry_count`, max 3 retries before asking for help
+4. **reviews marker required first** - Phase 3.5 must output `<reviews_complete/>` before `<gate_decision>`
+5. **Retry on invalid** - Wrong marker increments `retry_count`, max 3 retries before asking for help
 
 ### Exact Marker Formats
 
@@ -67,6 +79,7 @@ The hook parses your output for specific XML markers. **You MUST output the exac
 <phase_complete phase="3.2"/>
 
 <!-- Phase 3.5 -->
+<reviews_complete/>
 <gate_decision>PROCEED</gate_decision>
 <!-- or -->
 <gate_decision>BLOCK</gate_decision>
@@ -167,7 +180,9 @@ subagent_type="compound-engineering:review:agent-native-reviewer" (AI features)
 
 Add critical findings to spec's "Review Findings" section.
 
-**Output:** `<gate_decision>PROCEED</gate_decision>` or `<gate_decision>BLOCK</gate_decision>`
+**Output reviews marker first:** `<reviews_complete/>`
+
+**Then output gate decision:** `<gate_decision>PROCEED</gate_decision>` or `<gate_decision>BLOCK</gate_decision>`
 
 If BLOCK, address issues then re-output PROCEED.
 

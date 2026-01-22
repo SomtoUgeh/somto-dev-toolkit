@@ -76,8 +76,13 @@ The loop automatically detects:
 4. Identify ONE important user-facing feature
 5. Write ONE test for that feature
 6. Run coverage again
-7. Commit: `test(<file>): <describe behavior>`
-8. Log to `.claude/ut-progress.txt`
+7. **Run parallel reviews** (code-simplifier + Kieran reviewer in single message)
+8. Commit: `test(<file>): <describe behavior>`
+9. Log to `.claude/ut-progress.txt`
+
+## Branch Setup
+
+When starting on main/master, setup prompts to create a feature branch (`test/unit-coverage`).
 
 ## Stopping the Loop
 

@@ -10,6 +10,11 @@
 
 set -euo pipefail
 
+# Source shared helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/loop-helpers.sh
+source "$SCRIPT_DIR/lib/loop-helpers.sh"
+
 # Parse arguments
 INPUT="${*:-}"
 
@@ -21,7 +26,7 @@ SESSION_ID=$(cat .claude/.current_session 2>/dev/null || echo "default")
 
 STATE_FILE=".claude/prd-loop-${SESSION_ID}.local.md"
 
-# Classify input
+# Classify input FIRST (before branch setup needs feature name)
 INPUT_TYPE="empty"
 INPUT_PATH=""
 FEATURE_NAME=""
@@ -40,11 +45,11 @@ if [[ -n "$INPUT" ]]; then
     else
       # Path-like but doesn't exist - treat as idea
       INPUT_TYPE="idea"
-      FEATURE_NAME=$(echo "$INPUT" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-' | head -c 30)
+      FEATURE_NAME=$(echo "$INPUT" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr ' ' '-' | LC_ALL=C tr -cd '[:alnum:]-' | head -c 30)
     fi
   else
     INPUT_TYPE="idea"
-    FEATURE_NAME=$(echo "$INPUT" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-' | head -c 30)
+    FEATURE_NAME=$(echo "$INPUT" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr ' ' '-' | LC_ALL=C tr -cd '[:alnum:]-' | head -c 30)
   fi
 fi
 
@@ -52,6 +57,9 @@ fi
 if [[ -z "$FEATURE_NAME" ]]; then
   FEATURE_NAME="feature-$(date +%s)"
 fi
+
+# Branch setup - prompt user if on main/master (now that we have FEATURE_NAME)
+prompt_feature_branch "feat/$FEATURE_NAME"
 
 # Create state file with phase 1
 cat > "$STATE_FILE" <<EOF
@@ -69,10 +77,13 @@ prd_path: ""
 progress_path: ""
 interview_questions: 0
 max_iterations: 0
+reviews_complete: false
 gate_status: "pending"
 review_count: 0
 retry_count: 0
 last_error: ""
+working_branch: "$WORKING_BRANCH"
+branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 

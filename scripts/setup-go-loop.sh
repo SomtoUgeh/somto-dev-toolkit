@@ -12,6 +12,11 @@
 
 set -euo pipefail
 
+# Source shared helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/loop-helpers.sh
+source "$SCRIPT_DIR/lib/loop-helpers.sh"
+
 # Defaults
 MODE=""
 PROMPT_PARTS=()
@@ -181,6 +186,14 @@ mkdir -p .claude
 # Read session_id from SessionStart hook (with fallback for edge cases)
 SESSION_ID=$(cat .claude/.current_session 2>/dev/null || echo "default")
 
+# Branch setup - prompt user if on main/master
+if [[ -n "$PRD_PATH" ]]; then
+  SUGGESTED_BRANCH="feat/$(basename "$(dirname "$PRD_PATH")")"
+else
+  SUGGESTED_BRANCH="feat/$(echo "${PROMPT_PARTS[*]:-task}" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr ' ' '-' | LC_ALL=C tr -cd '[:alnum:]-' | head -c 30)"
+fi
+prompt_feature_branch "$SUGGESTED_BRANCH"
+
 STATE_FILE=".claude/go-loop-${SESSION_ID}.local.md"
 
 if [[ "$MODE" == "generic" ]]; then
@@ -232,6 +245,8 @@ iteration: 1
 max_iterations: $MAX_ITERATIONS
 completion_promise: $COMPLETION_PROMISE_YAML
 progress_path: "$PROGRESS_FILE"
+working_branch: "$WORKING_BRANCH"
+branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 
@@ -408,6 +423,8 @@ total_stories: $TOTAL_STORIES
 ${SKILL_FRONTMATTER:+$SKILL_FRONTMATTER
 }iteration: 1
 max_iterations: $MAX_ITERATIONS
+working_branch: "$WORKING_BRANCH"
+branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ---
 
@@ -452,10 +469,15 @@ $SKILL_SECTION## Your Task
    Types: feat (new feature), fix (bug fix), refactor, test, chore, docs
 
 When you're done with this story, the hook will automatically:
-- Verify the story passes in prd.json
-- Verify you committed
-- Log to progress.txt
+- Verify the story passes in prd.json (YOU must update this)
+- Verify you committed with story reference
+- Log to progress.txt (hook does this - don't touch it)
 - Advance to the next story (or complete if all done)
+
+**Your responsibilities:**
+1. Update \`$PRD_PATH\`: set \`passes: true\` for story $FIRST_INCOMPLETE
+2. Commit with message containing \`story #$FIRST_INCOMPLETE\`
+3. Output structured markers
 
 CRITICAL: Only mark the story as passing when it genuinely passes all verification steps.
 EOF

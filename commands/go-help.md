@@ -38,10 +38,12 @@ For structured development with PRD files from `/prd`.
 
 **How it works:**
 1. Reads prd.json, finds first incomplete story
-2. You implement the story, run tests, update prd.json, commit
-3. Hook verifies: story passes, commit exists
-4. Automatically advances to next story
-5. Completes when all stories pass
+2. You implement the story, run tests, update prd.json
+3. **Run parallel reviews** (code-simplifier + Kieran reviewer in single message)
+4. Commit with story reference
+5. Hook verifies: story passes, reviews done, commit exists
+6. Automatically advances to next story
+7. Completes when all stories pass
 
 **Features:**
 - Auto-detects `.json` files
@@ -75,10 +77,14 @@ Single iteration for learning, debugging, or risky tasks.
 - `/cancel-go` - Stop active loop
 - `/go-help` - This help
 
+## Branch Setup
+
+When starting on main/master, setup prompts to create a feature branch. This happens before Claude starts working.
+
 ## State File
 
 Both modes use `.claude/go-loop-<session>.local.md` which contains:
-- YAML frontmatter with mode, iteration, settings
+- YAML frontmatter with mode, iteration, settings, working_branch
 - Current prompt/task below the frontmatter
 
 ## Examples

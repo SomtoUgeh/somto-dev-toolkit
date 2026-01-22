@@ -21,6 +21,17 @@ Please work on the task. When you try to exit, the E2E test loop will feed the s
 
 ---
 
+## Branch Setup (Handled by Setup Script)
+
+When starting on main/master, the setup script prompts:
+1. "Create a feature branch?" [1/2]
+2. If yes, prompts for branch name (default: `test/e2e-coverage`)
+3. Creates branch before loop starts
+
+This happens in bash before Claude starts working.
+
+---
+
 ## Structured Output Control Flow
 
 The stop hook parses your output for specific XML markers. **You MUST output the exact marker format** to advance. Missing markers block progression with guidance.
@@ -64,12 +75,18 @@ Each iteration, you must:
 3. **Write ONE E2E test** (`*.e2e.ts`) that validates the flow
 4. **Run lint, format, and typecheck** the equivalent command in the codebase to ensure code quality
 5. **Run tests** to verify the test passes
-6. **[MANDATORY] Run code-simplifier** - ALWAYS use `pr-review-toolkit:code-simplifier` (max_turns: 15) to review changes. Address ALL suggestions.
-7. **[MANDATORY] Run Kieran review** - ALWAYS run based on what you changed (all max_turns: 20):
+6. **[MANDATORY] Run reviewers IN PARALLEL** - In ONE message, spawn multiple Task calls:
+   ```
+   Task 1: subagent_type="pr-review-toolkit:code-simplifier" (max_turns: 15)
+   Task 2: subagent_type="<kieran-reviewer-for-language>" (max_turns: 20)
+   ```
+   Kieran reviewers:
    - TypeScript/JavaScript: `compound-engineering:review:kieran-typescript-reviewer`
    - Python: `compound-engineering:review:kieran-python-reviewer`
-   - Database/migrations/data models: `compound-engineering:review:data-integrity-guardian`
-8. **[MANDATORY] Output reviews marker** after addressing all findings:
+   - Database/migrations: `compound-engineering:review:data-integrity-guardian`
+
+   All run in parallel → results return together → address ALL findings.
+7. **[MANDATORY] Output reviews marker** after addressing all findings:
    ```
    <reviews_complete/>
    ```
