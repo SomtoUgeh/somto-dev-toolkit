@@ -1028,7 +1028,7 @@ interview_questions: 0
 max_iterations: 0
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1074,7 +1074,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1124,7 +1124,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1173,7 +1173,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1223,7 +1223,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1283,7 +1283,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1318,6 +1318,59 @@ GATE_STATUS_BLOCKED=$(sed -n 's/^gate_status: \(.*\)/\1/p' "$STATE_FILE2D2" | he
 assert_eq "blocked" "$GATE_STATUS_BLOCKED" "gate_status updated to blocked"
 assert_contains "$HOOK_OUTPUT" "Review gate blocked" "blocked gate produces guidance"
 
+describe "PRD phase 3.5 does not auto-advance without gate decision"
+
+PROJECT_DIR2D3=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2D3"
+mkdir -p "$PROJECT_DIR2D3/.claude" "$PROJECT_DIR2D3/plans"
+
+SESSION_ID2D3="gateauto123"
+STATE_FILE2D3="$PROJECT_DIR2D3/.claude/prd-loop-${SESSION_ID2D3}.local.md"
+cat > "$STATE_FILE2D3" << EOF
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-review"
+current_phase: "3.5"
+input_type: "idea"
+input_path: ""
+input_raw: "Review feature"
+spec_path: "$PROJECT_DIR2D3/plans/spec.md"
+prd_path: ""
+progress_path: ""
+interview_questions: 0
+max_iterations: 0
+reviews_complete: true
+gate_status: "pending"
+review_count: 0
+phase_iteration: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+cat > "$PROJECT_DIR2D3/plans/spec.md" << 'EOF'
+# Spec
+## Review Findings
+- Found minor issues
+EOF
+
+TRANSCRIPT2D3="$PROJECT_DIR2D3/transcript.jsonl"
+write_transcript "$TRANSCRIPT2D3" "No markers yet."
+
+HOOK_INPUT2D3=$(build_hook_input "$SESSION_ID2D3" "$TRANSCRIPT2D3" "$PROJECT_DIR2D3")
+run_hook "$HOOK_INPUT2D3" "$PROJECT_DIR2D3"
+
+PHASE_STILL_35_D3=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2D3" | head -1)
+assert_eq "3.5" "$PHASE_STILL_35_D3" "phase 3.5 does not auto-advance without gate decision"
+GATE_STATUS_PENDING=$(sed -n 's/^gate_status: \(.*\)/\1/p' "$STATE_FILE2D3" | head -1 | tr -d '"')
+assert_eq "pending" "$GATE_STATUS_PENDING" "gate_status remains pending without gate decision"
+ITER_D3_UPDATED=$(sed -n 's/^phase_iteration: \(.*\)/\1/p' "$STATE_FILE2D3" | head -1)
+assert_eq "1" "$ITER_D3_UPDATED" "phase_iteration increments without gate decision"
+assert_contains "$HOOK_OUTPUT" "gate_decision" "prompts for gate decision in phase 3.5"
+
 describe "PRD phase 3.2 auto-advances when implementation patterns present"
 
 PROJECT_DIR2D=$(mktemp_dir)
@@ -1344,7 +1397,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1393,7 +1446,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1440,7 +1493,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1458,6 +1511,55 @@ run_hook "$HOOK_INPUT2F" "$PROJECT_DIR2F"
 PHASE_UPDATED_5=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2F" | head -1)
 assert_eq "5.5" "$PHASE_UPDATED_5" "phase 5 auto-advances to 5.5"
 assert_contains "$HOOK_OUTPUT" "Auto-advanced from 5" "auto-advance message for phase 5"
+
+describe "PRD phase 5.5 auto-advances when max_iterations exists in prd.json"
+
+PROJECT_DIR2F1=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2F1"
+mkdir -p "$PROJECT_DIR2F1/.claude" "$PROJECT_DIR2F1/plans"
+
+SESSION_ID2F1="autophase55"
+STATE_FILE2F1="$PROJECT_DIR2F1/.claude/prd-loop-${SESSION_ID2F1}.local.md"
+cat > "$STATE_FILE2F1" << EOF
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "feature-auto"
+current_phase: "5.5"
+input_type: "idea"
+input_path: ""
+input_raw: "Auto phase"
+spec_path: "$PROJECT_DIR2F1/plans/spec.md"
+prd_path: "$PROJECT_DIR2F1/plans/prd.json"
+progress_path: "$PROJECT_DIR2F1/plans/progress.txt"
+interview_questions: 0
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+phase_iteration: 0
+last_error: ""
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+cat > "$PROJECT_DIR2F1/plans/prd.json" << 'EOF'
+{ "title": "Feature", "max_iterations": 3, "stories": [] }
+EOF
+
+TRANSCRIPT2F1="$PROJECT_DIR2F1/transcript.jsonl"
+write_transcript "$TRANSCRIPT2F1" "No markers yet."
+
+HOOK_INPUT2F1=$(build_hook_input "$SESSION_ID2F1" "$TRANSCRIPT2F1" "$PROJECT_DIR2F1")
+run_hook "$HOOK_INPUT2F1" "$PROJECT_DIR2F1"
+
+PHASE_UPDATED_55=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2F1" | head -1)
+assert_eq "6" "$PHASE_UPDATED_55" "phase 5.5 auto-advances to 6"
+MAX_UPDATED_55=$(sed -n 's/^max_iterations: \(.*\)/\1/p' "$STATE_FILE2F1" | head -1)
+assert_eq "3" "$MAX_UPDATED_55" "max_iterations updated from prd.json"
+assert_contains "$HOOK_OUTPUT" "Auto-advanced from 5.5" "auto-advance message for phase 5.5"
 
 describe "PRD phase 6 auto-completes when files exist"
 
@@ -1485,7 +1587,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1505,24 +1607,24 @@ run_hook "$HOOK_INPUT2G" "$PROJECT_DIR2G"
 [[ -f "$STATE_FILE2G" ]] && state_status="exists" || state_status="missing"
 assert_eq "missing" "$state_status" "state file removed when phase 6 auto-completes"
 
-describe "PRD stuck detection prompts recovery"
+describe "PRD continuous prompting (ralph-loop style)"
 
 PROJECT_DIR2H=$(mktemp_dir)
 register_cleanup_dir "$PROJECT_DIR2H"
 mkdir -p "$PROJECT_DIR2H/.claude"
 
-SESSION_ID2H="recovery123"
+SESSION_ID2H="continuous123"
 STATE_FILE2H="$PROJECT_DIR2H/.claude/prd-loop-${SESSION_ID2H}.local.md"
 cat > "$STATE_FILE2H" << 'EOF'
 ---
 loop_type: "prd"
 mode: "prd"
 active: true
-feature_name: "feature-stuck"
+feature_name: "feature-continuous"
 current_phase: "2"
 input_type: "idea"
 input_path: ""
-input_raw: "Stuck feature"
+input_raw: "Continuous feature"
 spec_path: ""
 prd_path: ""
 progress_path: ""
@@ -1531,8 +1633,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 2
-last_error: ""
+phase_iteration: 5
 started_at: "2024-01-01T00:00:00Z"
 ---
 # PRD Loop
@@ -1544,9 +1645,100 @@ write_transcript "$TRANSCRIPT2H" "No markers yet."
 HOOK_INPUT2H=$(build_hook_input "$SESSION_ID2H" "$TRANSCRIPT2H" "$PROJECT_DIR2H")
 run_hook "$HOOK_INPUT2H" "$PROJECT_DIR2H"
 
-assert_contains "$HOOK_OUTPUT" "Recovery Needed" "max retries triggers recovery prompt"
-RETRY_UPDATED=$(sed -n 's/^retry_count: \(.*\)/\1/p' "$STATE_FILE2H" | head -1)
-assert_eq "3" "$RETRY_UPDATED" "retry_count increments to max"
+# Should continue prompting, not stop (ralph-loop style)
+assert_contains "$HOOK_OUTPUT" '"decision": "block"' "continues prompting instead of stopping"
+assert_contains "$HOOK_OUTPUT" "Phase 2" "still shows phase prompt"
+ITER_UPDATED=$(sed -n 's/^phase_iteration: \(.*\)/\1/p' "$STATE_FILE2H" | head -1)
+assert_eq "6" "$ITER_UPDATED" "phase_iteration increments"
+
+describe "PRD COMPLETE promise exits loop immediately"
+
+PROJECT_DIR2I=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2I"
+mkdir -p "$PROJECT_DIR2I/.claude"
+
+SESSION_ID2I="prdpromise123"
+STATE_FILE2I="$PROJECT_DIR2I/.claude/prd-loop-${SESSION_ID2I}.local.md"
+cat > "$STATE_FILE2I" << 'EOF'
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "promise-feature"
+current_phase: "4"
+input_type: "idea"
+input_path: ""
+input_raw: "Promise feature"
+spec_path: "plans/promise-feature/spec.md"
+prd_path: ""
+progress_path: ""
+interview_questions: 10
+max_iterations: 0
+reviews_complete: true
+gate_status: "proceed"
+review_count: 0
+phase_iteration: 0
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+TRANSCRIPT2I="$PROJECT_DIR2I/transcript.jsonl"
+write_transcript "$TRANSCRIPT2I" "All done! <promise>PRD COMPLETE</promise>"
+
+HOOK_INPUT2I=$(build_hook_input "$SESSION_ID2I" "$TRANSCRIPT2I" "$PROJECT_DIR2I")
+run_hook "$HOOK_INPUT2I" "$PROJECT_DIR2I"
+
+[[ -f "$STATE_FILE2I" ]] && promise_state="exists" || promise_state="missing"
+assert_eq "missing" "$promise_state" "PRD COMPLETE promise removes state file"
+
+describe "File-based auto-advance for phase 3"
+
+PROJECT_DIR2J=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR2J"
+mkdir -p "$PROJECT_DIR2J/.claude"
+mkdir -p "$PROJECT_DIR2J/plans/auto-feature"
+
+SESSION_ID2J="autoadvance123"
+STATE_FILE2J="$PROJECT_DIR2J/.claude/prd-loop-${SESSION_ID2J}.local.md"
+cat > "$STATE_FILE2J" << 'EOF'
+---
+loop_type: "prd"
+mode: "prd"
+active: true
+feature_name: "auto-feature"
+current_phase: "3"
+input_type: "idea"
+input_path: ""
+input_raw: "Auto feature"
+spec_path: "plans/auto-feature/spec.md"
+prd_path: "plans/auto-feature/prd.json"
+progress_path: "plans/auto-feature/progress.txt"
+interview_questions: 10
+max_iterations: 0
+reviews_complete: false
+gate_status: "pending"
+review_count: 0
+phase_iteration: 0
+started_at: "2024-01-01T00:00:00Z"
+---
+# PRD Loop
+EOF
+
+# Create spec file at convention path (triggers auto-advance)
+cat > "$PROJECT_DIR2J/plans/auto-feature/spec.md" << 'EOF'
+# Auto Feature Spec
+This is a test spec.
+EOF
+
+TRANSCRIPT2J="$PROJECT_DIR2J/transcript.jsonl"
+write_transcript "$TRANSCRIPT2J" "I wrote the spec file but forgot the marker."
+
+HOOK_INPUT2J=$(build_hook_input "$SESSION_ID2J" "$TRANSCRIPT2J" "$PROJECT_DIR2J")
+run_hook "$HOOK_INPUT2J" "$PROJECT_DIR2J"
+
+PHASE_AFTER=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE2J" | head -1)
+assert_eq "3.2" "$PHASE_AFTER" "auto-advances to 3.2 when spec.md exists"
 
 describe "Promise extraction uses last match"
 
@@ -1619,7 +1811,7 @@ max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
+phase_iteration: 0
 last_error: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
@@ -1637,10 +1829,9 @@ assert_eq "0" "$HOOK_STATUS" "hook exits cleanly for invalid next phase"
 assert_contains "$HOOK_OUTPUT" '"decision": "block"' "hook blocks on invalid next phase"
 PHASE_STILL=$(sed -n 's/^current_phase: "\(.*\)"/\1/p' "$STATE_FILE4" | head -1)
 assert_eq "1" "$PHASE_STILL" "phase remains unchanged on invalid next"
-RETRY_COUNT_UPDATED=$(sed -n 's/^retry_count: \(.*\)/\1/p' "$STATE_FILE4" | head -1)
-assert_eq "1" "$RETRY_COUNT_UPDATED" "retry_count increments on invalid next"
-LAST_ERROR_UPDATED=$(sed -n 's/^last_error: "\(.*\)"/\1/p' "$STATE_FILE4" | head -1)
-assert_contains "$LAST_ERROR_UPDATED" "Invalid next phase '7'" "last_error records invalid next phase"
+PHASE_ITER_UPDATED=$(sed -n 's/^phase_iteration: \(.*\)/\1/p' "$STATE_FILE4" | head -1)
+assert_eq "1" "$PHASE_ITER_UPDATED" "phase_iteration increments on invalid next"
+# Note: last_error tracking removed in ralph-loop refactor
 
 # =============================================================================
 section "INTEGRATION: Transcript parsing resilience"
@@ -1819,7 +2010,7 @@ write_transcript "$TRANSCRIPT9" "No markers yet."
 HOOK_INPUT9=$(build_hook_input "$SESSION_ID9" "$TRANSCRIPT9" "$PROJECT_DIR9")
 run_hook "$HOOK_INPUT9" "$PROJECT_DIR9"
 
-assert_contains "$HOOK_OUTPUT" "not yet passing" "blocks when story not passing"
+assert_contains "$HOOK_OUTPUT" "working on verification" "blocks when story not passing"
 
 describe "Passing story without reviews blocks"
 
@@ -1838,7 +2029,7 @@ write_transcript "$TRANSCRIPT10" "No markers yet."
 HOOK_INPUT10=$(build_hook_input "$SESSION_ID10" "$TRANSCRIPT10" "$PROJECT_DIR10")
 run_hook "$HOOK_INPUT10" "$PROJECT_DIR10"
 
-assert_contains "$HOOK_OUTPUT" "REVIEWS NOT run" "blocks when reviews missing"
+assert_contains "$HOOK_OUTPUT" "Now run reviews" "blocks when reviews missing"
 
 describe "Reviews complete but no story_complete blocks"
 
@@ -1868,9 +2059,11 @@ mkdir -p "$PROJECT_DIR12/.claude" "$PROJECT_DIR12/plans"
 SESSION_ID12="mismatch123"
 STATE_FILE12="$PROJECT_DIR12/.claude/go-loop-${SESSION_ID12}.local.md"
 write_go_prd_state "$STATE_FILE12" "$PROJECT_DIR12/plans/prd.json" "$PROJECT_DIR12/plans/spec.md" "feature-d" 1 2 1
-write_prd_two_stories "$PROJECT_DIR12/plans/prd.json" "true" "false"
+# Story 1 passes=false so no auto-reconciliation - tests mismatch detection
+write_prd_two_stories "$PROJECT_DIR12/plans/prd.json" "false" "false"
 
 TRANSCRIPT12="$PROJECT_DIR12/transcript.jsonl"
+# Output story_id="2" when current is 1 - should trigger mismatch
 write_transcript "$TRANSCRIPT12" "<reviews_complete/>\n<story_complete story_id=\"2\"/>"
 
 HOOK_INPUT12=$(build_hook_input "$SESSION_ID12" "$TRANSCRIPT12" "$PROJECT_DIR12")
@@ -1935,7 +2128,7 @@ write_transcript "$TRANSCRIPT15" "<reviews_complete/>\n<story_complete story_id=
 HOOK_INPUT15=$(build_hook_input "$SESSION_ID15" "$TRANSCRIPT15" "$PROJECT_DIR15")
 run_hook "$HOOK_INPUT15" "$PROJECT_DIR15"
 
-assert_contains "$HOOK_OUTPUT" "NO COMMIT found" "blocks when commit missing"
+assert_contains "$HOOK_OUTPUT" "Commit" "blocks when commit missing"
 ITER_UPDATED=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE15" | head -1)
 assert_eq "2" "$ITER_UPDATED" "iteration increments when commit missing"
 
@@ -2010,7 +2203,7 @@ write_transcript "$TRANSCRIPT18" "No markers yet."
 HOOK_INPUT18=$(build_hook_input "$SESSION_ID18" "$TRANSCRIPT18" "$PROJECT_DIR18")
 run_hook "$HOOK_INPUT18" "$PROJECT_DIR18"
 
-assert_contains "$HOOK_OUTPUT" "Reviews NOT run" "blocks when UT reviews missing"
+assert_contains "$HOOK_OUTPUT" "Reviews not yet run" "blocks when UT reviews missing"
 
 describe "UT reviews complete but iteration missing blocks"
 
@@ -2028,7 +2221,29 @@ write_transcript "$TRANSCRIPT19" "<reviews_complete/>"
 HOOK_INPUT19=$(build_hook_input "$SESSION_ID19" "$TRANSCRIPT19" "$PROJECT_DIR19")
 run_hook "$HOOK_INPUT19" "$PROJECT_DIR19"
 
-assert_contains "$HOOK_OUTPUT" "iteration incomplete" "blocks when iteration marker missing"
+assert_contains "$HOOK_OUTPUT" "Commit your test" "blocks when iteration marker missing"
+
+describe "UT fallback advances without iteration marker when test commit exists"
+
+PROJECT_DIR19B=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR19B"
+mkdir -p "$PROJECT_DIR19B/.claude"
+init_git_repo "$PROJECT_DIR19B"
+git_commit_file "$PROJECT_DIR19B" "test: add coverage" "README.md" "tests"
+
+SESSION_ID19B="utfallback123"
+STATE_FILE19B="$PROJECT_DIR19B/.claude/ut-loop-${SESSION_ID19B}.local.md"
+write_loop_state "$STATE_FILE19B" "ut" 1
+
+TRANSCRIPT19B="$PROJECT_DIR19B/transcript.jsonl"
+write_transcript "$TRANSCRIPT19B" "<reviews_complete/>"
+
+HOOK_INPUT19B=$(build_hook_input "$SESSION_ID19B" "$TRANSCRIPT19B" "$PROJECT_DIR19B")
+run_hook "$HOOK_INPUT19B" "$PROJECT_DIR19B"
+
+assert_contains "$HOOK_OUTPUT" '"decision": "block"' "UT continues loop after fallback advance"
+ITER_UT_FALLBACK=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE19B" | head -1)
+assert_eq "2" "$ITER_UT_FALLBACK" "UT iteration increments via fallback"
 
 describe "UT markers without test commit blocks"
 
@@ -2048,7 +2263,7 @@ write_transcript "$TRANSCRIPT20" "<reviews_complete/>\n<iteration_complete test_
 HOOK_INPUT20=$(build_hook_input "$SESSION_ID20" "$TRANSCRIPT20" "$PROJECT_DIR20")
 run_hook "$HOOK_INPUT20" "$PROJECT_DIR20"
 
-assert_contains "$HOOK_OUTPUT" "NO COMMIT found" "blocks when test commit missing"
+assert_contains "$HOOK_OUTPUT" "Commit" "blocks when test commit missing"
 ITER_UT=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE20" | head -1)
 assert_eq "1" "$ITER_UT" "iteration remains when UT commit missing"
 
@@ -2073,6 +2288,28 @@ run_hook "$HOOK_INPUT21" "$PROJECT_DIR21"
 assert_contains "$HOOK_OUTPUT" '"decision": "block"' "UT continues loop after successful iteration"
 ITER_UT_NEXT=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE21" | head -1)
 assert_eq "2" "$ITER_UT_NEXT" "UT iteration increments on success"
+
+describe "E2E fallback advances without iteration marker when test commit exists"
+
+PROJECT_DIR21B=$(mktemp_dir)
+register_cleanup_dir "$PROJECT_DIR21B"
+mkdir -p "$PROJECT_DIR21B/.claude"
+init_git_repo "$PROJECT_DIR21B"
+git_commit_file "$PROJECT_DIR21B" "e2e: add flow" "README.md" "e2e"
+
+SESSION_ID21B="e2efallback123"
+STATE_FILE21B="$PROJECT_DIR21B/.claude/e2e-loop-${SESSION_ID21B}.local.md"
+write_loop_state "$STATE_FILE21B" "e2e" 1
+
+TRANSCRIPT21B="$PROJECT_DIR21B/transcript.jsonl"
+write_transcript "$TRANSCRIPT21B" "<reviews_complete/>"
+
+HOOK_INPUT21B=$(build_hook_input "$SESSION_ID21B" "$TRANSCRIPT21B" "$PROJECT_DIR21B")
+run_hook "$HOOK_INPUT21B" "$PROJECT_DIR21B"
+
+assert_contains "$HOOK_OUTPUT" '"decision": "block"' "E2E continues loop after fallback advance"
+ITER_E2E_FALLBACK=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE21B" | head -1)
+assert_eq "2" "$ITER_E2E_FALLBACK" "E2E iteration increments via fallback"
 
 describe "E2E with test commit advances iteration"
 

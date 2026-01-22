@@ -61,6 +61,11 @@ fi
 # Branch setup - prompt user if on main/master (now that we have FEATURE_NAME)
 prompt_feature_branch "feat/$FEATURE_NAME"
 
+# Pre-compute expected paths (convention-based discovery)
+EXPECTED_SPEC="plans/$FEATURE_NAME/spec.md"
+EXPECTED_PRD="plans/$FEATURE_NAME/prd.json"
+EXPECTED_PROGRESS="plans/$FEATURE_NAME/progress.txt"
+
 # Create state file with phase 1
 cat > "$STATE_FILE" <<EOF
 ---
@@ -72,17 +77,16 @@ current_phase: "1"
 input_type: "$INPUT_TYPE"
 input_path: "$INPUT_PATH"
 input_raw: "$INPUT"
-spec_path: ""
-prd_path: ""
-progress_path: ""
+spec_path: "$EXPECTED_SPEC"
+prd_path: "$EXPECTED_PRD"
+progress_path: "$EXPECTED_PROGRESS"
 interview_questions: 0
 interview_wave: 1
 max_iterations: 0
 reviews_complete: false
 gate_status: "pending"
 review_count: 0
-retry_count: 0
-last_error: ""
+phase_iteration: 0
 working_branch: "$WORKING_BRANCH"
 branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -32,7 +32,7 @@ This happens in bash before Claude starts working.
 
 ## Structured Output Control Flow
 
-The hook parses your output for specific XML markers. **You MUST output the exact marker format** for your current phase to advance. Invalid or missing markers trigger retry with guidance.
+The hook uses **file existence as primary truth** (ralph-loop pattern). Markers are optional but recommended for explicit control, except Phase 3.5 which requires `<reviews_complete/>` and `<gate_decision>`. If you complete the work but forget the marker, the hook detects file existence and auto-advances (where allowed).
 
 ### Phase Transition Table
 
@@ -49,13 +49,32 @@ The hook parses your output for specific XML markers. **You MUST output the exac
 | 5.5 | Complexity | `<max_iterations>` | integer N | 6 |
 | 6 | Go Command | `<phase_complete phase="6"/>` | none | done |
 
-### Marker Validation Rules
+### Detection Priority (File > Marker)
+
+1. **File existence is truth** - If `plans/<feature>/spec.md` exists, phase 3 is considered complete
+2. **Markers are explicit signals** - Still work and take precedence when present
+3. **Last marker wins** - If docs/examples contain markers, only the LAST occurrence counts
+4. **Auto-discovery** - Paths follow convention: `plans/<feature>/{spec.md,prd.json,progress.txt}`
+5. **Continuous loop** - Never stops on missing markers; keeps prompting until work is done
+6. **Phase 3.5 gate** - No file-based auto-advance; requires explicit `<gate_decision>`
+
+### File-Based Auto-Advance
+
+| Phase | Auto-Advances When |
+|-------|-------------------|
+| 3 | `plans/<feature>/spec.md` exists |
+| 3.2 | spec.md contains "## Implementation Patterns" |
+| 3.5 | No auto-advance (requires `<reviews_complete/>` + `<gate_decision>`) |
+| 4 | `plans/<feature>/prd.json` exists and is valid JSON |
+| 5 | `plans/<feature>/progress.txt` exists |
+| 5.5 | `prd.json` contains `max_iterations` field (any positive integer) |
+| 6 | All three files exist → **loop complete** |
+
+### Marker Validation Rules (When Using Markers)
 
 1. **phase attribute must match current phase** - `<phase_complete phase="3"/>` when in phase 2 is ignored
-2. **Last marker wins** - If docs/examples contain markers, only the LAST occurrence counts
-3. **next attribute validated** - Phase 1→only 2, Phase 2→only 2.5 or 3, Phase 2.5→only 2
-4. **reviews marker required first** - Phase 3.5 must output `<reviews_complete/>` before `<gate_decision>`
-5. **Retry on invalid** - Wrong marker increments `retry_count`, max 3 retries before asking for help
+2. **next attribute validated** - Phase 1→only 2, Phase 2→only 2.5 or 3, Phase 2.5→only 2
+3. **reviews marker required first** - Phase 3.5 must output `<reviews_complete/>` before `<gate_decision>`
 
 ### Exact Marker Formats
 
@@ -322,10 +341,7 @@ Wait for agent to return, then output with agent's recommended value.
 ```xml
 <max_iterations>N</max_iterations>
 ```
-Where N is between 5 and 100. The SubagentStop hook validates:
-- Output contains the `<max_iterations>` tag
-- Value is within valid range (5-100)
-- Agent will be blocked and asked to retry if validation fails
+Where N is the value from the agent (recommended range: 5-100).
 
 **Output:** `<max_iterations>N</max_iterations>` where N is from the agent
 
@@ -343,7 +359,10 @@ esac
 
 2. Use AskUserQuestion with options: "Run /go now", "Run /go --once", "Done"
 
-**Output:** `<phase_complete phase="6"/>`
+**Output (any of these work):**
+- `<phase_complete phase="6"/>` - explicit marker
+- `<promise>PRD COMPLETE</promise>` - completion promise (immediate exit)
+- If all files exist, loop auto-completes
 
 ---
 
@@ -366,19 +385,22 @@ The PRD workflow uses SubagentStop hooks to validate agent output quality before
 | prd-codebase-researcher | `## Existing Patterns`, `## Files to Modify`, or `## Models` |
 | prd-external-researcher | `## Best Practices`, `## Code Examples`, or `## Pitfalls` |
 | git-history-analyzer | `## History`, `## Evolution`, or `## Contributors` |
-| prd-complexity-estimator | `<max_iterations>N</max_iterations>` (5 <= N <= 100) |
+| prd-complexity-estimator | `<max_iterations>N</max_iterations>` (positive integer) |
 | All review agents | Findings, recommendations, or explicit "no issues" |
 
 ---
 
-## Error Recovery
+## Continuous Loop Behavior
 
-If you output an invalid marker:
-- Hook increments `retry_count` and records `last_error`
-- You get the same phase prompt with a note about the expected marker
-- After 3 retries, hook pauses for user intervention
+Unlike retry-based loops, the PRD workflow **never stops on missing markers**:
+- Hook increments `phase_iteration` and continues prompting
+- File-based detection handles most cases automatically
+- No max retries - just keeps working until files exist
 
-Check state file for `retry_count` and `last_error` if stuck.
+**Completion signals:**
+1. Phase 6 marker: `<phase_complete phase="6"/>`
+2. File detection: all three files exist in `plans/<feature>/`
+3. Explicit promise: `<promise>PRD COMPLETE</promise>` (immediate exit)
 
 ---
 

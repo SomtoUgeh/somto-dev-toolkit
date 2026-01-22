@@ -71,28 +71,28 @@ This happens in bash before Claude starts working.
 
 ## Structured Output Control Flow
 
-The stop hook parses your output for specific XML markers. **You MUST output the exact marker format** to advance. Missing or invalid markers block progression with guidance.
+The stop hook uses **markers as signals, with fallback detection** for resilience. If you complete the work but forget a marker, the hook can detect from prd.json and git state.
 
 ### Marker Summary by Mode
 
-| Mode | Marker | When | Required |
-|------|--------|------|----------|
-| Generic | `<promise>TEXT</promise>` | Task complete | Yes (to exit) |
-| PRD | `<reviews_complete/>` | After running reviewers | Yes |
-| PRD | `<story_complete story_id="N"/>` | After commit | Yes |
+| Mode | Marker | Fallback |
+|------|--------|----------|
+| Generic | `<promise>TEXT</promise>` | None (explicit exit) |
+| PRD | `<reviews_complete/>` | **None** (quality gate) |
+| PRD | `<story_complete story_id="N"/>` | prd.json passes + commit → auto-advances |
 
-### PRD Mode Control Flow (ENFORCED)
+### PRD Mode Control Flow
 
-The hook validates this EXACT sequence before advancing to next story:
+The hook validates these conditions before advancing to next story:
 
 ```
 1. prd.json shows passes: true for current story
-2. <reviews_complete/> marker in output
+2. <reviews_complete/> marker in output (REQUIRED - no fallback)
 3. Git commit exists with story reference (e.g., "story #N")
-4. <story_complete story_id="N"/> marker in output
+4. <story_complete story_id="N"/> marker in output (or auto-detected from above)
 ```
 
-**If ANY step missing**, hook blocks with specific guidance.
+**Fallback detection**: If story passes in prd.json AND commit exists but marker missing, hook auto-advances.
 
 ### Exact Marker Formats
 
@@ -189,16 +189,18 @@ IMPORTANT: If a completion promise is set, you may ONLY output it when the state
 
 ---
 
-## Error States
+## Loop Behavior
 
-**Missing prd.json**: Hook blocks with message to restore file or rerun /prd.
+The loop continues prompting until work is complete. No hard failures on missing markers.
 
-**Invalid prd.json**: Hook blocks with message to fix JSON syntax.
+**Missing prd.json**: Prompts to restore file or rerun /prd.
 
-**Story not passing**: Hook reminds to update prd.json with `passes: true`.
+**Invalid prd.json**: Prompts to fix JSON syntax.
 
-**Reviews not run**: Hook blocks with specific reviewer instructions.
+**Story not passing**: Reminds to update prd.json with `passes: true`.
 
-**Commit not found**: Hook blocks with commit format reminder.
+**Reviews not run**: Prompts with reviewer instructions (required quality gate).
 
-**story_id mismatch**: Hook rejects and reminds of current story ID.
+**Commit not found**: Reminds with commit format.
+
+**story_id mismatch**: Reminds of current story ID.

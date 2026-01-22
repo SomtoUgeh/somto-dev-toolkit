@@ -26,16 +26,21 @@
 #
 # STATE FILES: .claude/{go,ut,e2e,prd}-loop-{session_id}.local.md
 #   Format: YAML frontmatter (---...---) + markdown body (prompt)
-#   Key fields: iteration, max_iterations, completion_promise, current_phase, etc.
+#   Key fields: iteration, max_iterations, completion_promise, current_phase, phase_iteration, etc.
+#
+# PRD LOOP (ralph-loop pattern):
+#   - File existence is truth (markers optional) - auto-discovers from plans/<feature>/
+#   - Never stops on missing markers - just keeps prompting
+#   - Completion signals: phase 6 marker, all files exist, or <promise>PRD COMPLETE</promise>
 #
 # STRUCTURED OUTPUT MARKERS (parsed from Claude's response):
-#   - <phase_complete phase="N" .../>  - PRD phase transitions
+#   - <phase_complete phase="N" .../>  - PRD phase transitions (optional - file detection is primary)
 #   - <gate_decision>PROCEED|BLOCK</gate_decision> - PRD review gate
 #   - <max_iterations>N</max_iterations> - PRD complexity estimate
 #   - <story_complete story_id="N"/> - Go/PRD story completion
 #   - <iteration_complete test_file="..."/> - UT/E2E iteration
 #   - <reviews_complete/> - Confirms code reviews ran
-#   - <promise>TEXT</promise> - Loop completion signal
+#   - <promise>TEXT</promise> - Loop completion signal (PRD accepts "PRD COMPLETE")
 #
 # SECURITY HARDENING:
 #   - Session ID validation (alphanumeric only, no path traversal)
@@ -655,17 +660,28 @@ if [[ "$ACTIVE_LOOP" == "prd" ]]; then
   GATE_STATUS=$(get_field "$FRONTMATTER" "gate_status")
   REVIEW_COUNT=$(get_field "$FRONTMATTER" "review_count")
   REVIEWS_COMPLETE=$(get_field "$FRONTMATTER" "reviews_complete")
-  RETRY_COUNT=$(get_field "$FRONTMATTER" "retry_count")
+  PHASE_ITERATION=$(get_field "$FRONTMATTER" "phase_iteration")
+
+  # ===========================================================================
+  # COMPLETION PROMISE: Check for explicit completion signal (ralph-loop style)
+  # ===========================================================================
+  if [[ -n "$LAST_OUTPUT" ]]; then
+    PRD_PROMISE=$(extract_promise_last "$LAST_OUTPUT")
+    if [[ "$PRD_PROMISE" == "PRD COMPLETE" ]]; then
+      echo "✅ Loop (prd): Detected <promise>PRD COMPLETE</promise>"
+      echo "   Feature '$FEATURE_NAME' PRD workflow complete!"
+      notify "Loop (prd)" "PRD complete for $FEATURE_NAME!"
+      rm "$STATE_FILE"
+      exit 0
+    fi
+  fi
 
   # Default numeric fields
   [[ ! "$INTERVIEW_QUESTIONS" =~ ^[0-9]+$ ]] && INTERVIEW_QUESTIONS=0
   [[ ! "$INTERVIEW_WAVE" =~ ^[0-9]+$ ]] && INTERVIEW_WAVE=1
   [[ ! "$REVIEW_COUNT" =~ ^[0-9]+$ ]] && REVIEW_COUNT=0
-  [[ ! "$RETRY_COUNT" =~ ^[0-9]+$ ]] && RETRY_COUNT=0
+  [[ ! "$PHASE_ITERATION" =~ ^[0-9]+$ ]] && PHASE_ITERATION=0
   [[ "$REVIEWS_COMPLETE" != "true" ]] && REVIEWS_COMPLETE="false"
-
-  # Max retries before asking user for help
-  MAX_RETRIES=3
 
   # Parse structured output markers from LAST_OUTPUT
   PHASE_COMPLETE=""
@@ -790,7 +806,7 @@ $wave_guidance
 <phase_complete phase=\"2\" next=\"3\"/>
 \`\`\`
 
-**IMPORTANT:** You MUST output one of these markers at the end of your response. The loop cannot advance without the marker."
+**Markers (optional but recommended):** Output one of these markers at the end of your response. If you forget, the loop auto-advances when work is detected."
         ;;
       "2.5")
         prompt="# PRD Loop: Phase 2.5 - Research
@@ -1004,7 +1020,7 @@ Read the spec first, then pass content to each reviewer.
 3. Prioritize findings by severity (Critical > High > Medium)
 4. If critical issues found, use AskUserQuestion: \"Reviewers found <issues>. Address now or proceed?\"
 
-**IMPORTANT:** After incorporating findings, output BOTH markers in the SAME response:
+**Markers (required to advance):** After incorporating findings, output BOTH markers in the SAME response:
 \`\`\`
 <reviews_complete/>
 <gate_decision>PROCEED</gate_decision>
@@ -1188,7 +1204,7 @@ After user responds, output:
 
   # Check if we got a valid marker for the current phase
   # IMPORTANT: For phase_complete, must also validate phase attribute matches current phase
-  # to prevent wrong-phase markers from resetting retry count and causing infinite loops
+  # to prevent wrong-phase markers from being treated as valid completions
   VALID_MARKER_FOUND=false
   case "$CURRENT_PHASE" in
     "5.5")
@@ -1208,10 +1224,9 @@ After user responds, output:
   esac
 
   if [[ "$VALID_MARKER_FOUND" == "true" ]]; then
-    # Reset retry count on success
-    if [[ $RETRY_COUNT -gt 0 ]]; then
-      sed_inplace "s/^retry_count: .*/retry_count: 0/" "$STATE_FILE"
-      sed_inplace "s/^last_error: .*/last_error: \"\"/" "$STATE_FILE"
+    # Reset phase iteration on success
+    if [[ $PHASE_ITERATION -gt 0 ]]; then
+      sed_inplace "s/^phase_iteration: .*/phase_iteration: 0/" "$STATE_FILE"
     fi
   fi
 
@@ -1246,9 +1261,8 @@ After user responds, output:
 reviews_complete: true" "$STATE_FILE"
       fi
       REVIEWS_COMPLETE="true"
-      if [[ $RETRY_COUNT -gt 0 ]]; then
-        sed_inplace "s/^retry_count: .*/retry_count: 0/" "$STATE_FILE"
-        sed_inplace "s/^last_error: .*/last_error: \"\"/" "$STATE_FILE"
+      if [[ $PHASE_ITERATION -gt 0 ]]; then
+        sed_inplace "s/^phase_iteration: .*/phase_iteration: 0/" "$STATE_FILE"
       fi
     fi
 
@@ -1355,43 +1369,82 @@ reviews_complete: true" "$STATE_FILE"
 
   # =============================================================================
   # FALLBACK DETECTION: Auto-advance when work is done but marker is missing
-  # This prevents loops where Claude completes work but forgets the marker
+  # Ralph-loop style: file existence is truth, markers are optional signals
+  # Phase 3.5 is a strict gate: no auto-advance without explicit gate_decision.
   # =============================================================================
+
+  # Auto-discover paths from convention if not set
+  EXPECTED_SPEC="plans/$FEATURE_NAME/spec.md"
+  EXPECTED_PRD="plans/$FEATURE_NAME/prd.json"
+  EXPECTED_PROGRESS="plans/$FEATURE_NAME/progress.txt"
+
   if [[ -z "$NEXT_PHASE" ]] && [[ -z "$INVALID_NEXT_REASON" ]]; then
     case "$CURRENT_PHASE" in
+      "3")
+        # Check if spec file exists at convention path
+        if [[ -f "$EXPECTED_SPEC" ]]; then
+          echo "⚠️  Loop (prd): Phase 3 work detected (spec.md exists). Auto-advancing to 3.2." >&2
+          NEXT_PHASE="3.2"
+          # Update state with discovered path
+          SPEC_PATH="$EXPECTED_SPEC"
+          ESCAPED_PATH=$(escape_sed_replacement "$SPEC_PATH")
+          sed_inplace "s|^spec_path: .*|spec_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
+          SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 3→3.2 (marker missing but spec.md exists)"
+        fi
+        ;;
       "3.2")
         # Check if spec has Implementation Patterns section
-        if [[ -n "$SPEC_PATH" ]] && [[ -f "$SPEC_PATH" ]] && grep -q "## Implementation Patterns" "$SPEC_PATH" 2>/dev/null; then
+        SPEC_TO_CHECK="${SPEC_PATH:-$EXPECTED_SPEC}"
+        if [[ -f "$SPEC_TO_CHECK" ]] && grep -q "## Implementation Patterns" "$SPEC_TO_CHECK" 2>/dev/null; then
           echo "⚠️  Loop (prd): Phase 3.2 work detected (spec has Implementation Patterns). Auto-advancing to 3.5." >&2
           NEXT_PHASE="3.5"
           SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 3.2→3.5 (marker missing but work done)"
         fi
         ;;
       "4")
-        # Check if PRD JSON file exists
-        if [[ -n "$PRD_PATH" ]] && [[ -f "$PRD_PATH" ]] && jq empty "$PRD_PATH" 2>/dev/null; then
+        # Check if PRD JSON file exists at convention path
+        PRD_TO_CHECK="${PRD_PATH:-$EXPECTED_PRD}"
+        if [[ -f "$PRD_TO_CHECK" ]] && jq empty "$PRD_TO_CHECK" 2>/dev/null; then
           echo "⚠️  Loop (prd): Phase 4 work detected (PRD file exists). Auto-advancing to 5." >&2
           NEXT_PHASE="5"
+          PRD_PATH="$PRD_TO_CHECK"
+          ESCAPED_PATH=$(escape_sed_replacement "$PRD_PATH")
+          sed_inplace "s|^prd_path: .*|prd_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
           SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 4→5 (marker missing but PRD exists)"
         fi
         ;;
       "5")
-        # Check if progress file exists
-        progress_path_check=$(get_field "$FRONTMATTER" "progress_path")
-        if [[ -n "$progress_path_check" ]] && [[ -f "$progress_path_check" ]]; then
+        # Check if progress file exists at convention path
+        PROGRESS_TO_CHECK="${PROGRESS_PATH:-$EXPECTED_PROGRESS}"
+        if [[ -f "$PROGRESS_TO_CHECK" ]]; then
           echo "⚠️  Loop (prd): Phase 5 work detected (progress file exists). Auto-advancing to 5.5." >&2
           NEXT_PHASE="5.5"
+          ESCAPED_PATH=$(escape_sed_replacement "$PROGRESS_TO_CHECK")
+          sed_inplace "s|^progress_path: .*|progress_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
           SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 5→5.5 (marker missing but progress file exists)"
+        fi
+        ;;
+      "5.5")
+        # Check if max_iterations is already set in prd.json (agent may have written it there)
+        PRD_TO_CHECK="${PRD_PATH:-$EXPECTED_PRD}"
+        if [[ -f "$PRD_TO_CHECK" ]]; then
+          PRD_MAX_ITER=$(jq -r '.max_iterations // empty' "$PRD_TO_CHECK" 2>/dev/null)
+          # Accept any positive integer (consistent with marker flow)
+          if [[ -n "$PRD_MAX_ITER" ]] && [[ "$PRD_MAX_ITER" =~ ^[0-9]+$ ]] && [[ "$PRD_MAX_ITER" -gt 0 ]]; then
+            echo "⚠️  Loop (prd): Phase 5.5 work detected (max_iterations in prd.json). Auto-advancing to 6." >&2
+            NEXT_PHASE="6"
+            sed_inplace "s/^max_iterations: .*/max_iterations: $PRD_MAX_ITER/" "$STATE_FILE"
+            MAX_ITERATIONS="$PRD_MAX_ITER"
+            SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 5.5→6 (max_iterations=$PRD_MAX_ITER found in prd.json)"
+          fi
         fi
         ;;
       "6")
         # Phase 6 is just presentation - if all files exist, PRD is complete
-        prd_check=$(get_field "$FRONTMATTER" "prd_path")
-        spec_check=$(get_field "$FRONTMATTER" "spec_path")
-        progress_check=$(get_field "$FRONTMATTER" "progress_path")
-        if [[ -n "$prd_check" ]] && [[ -f "$prd_check" ]] && \
-           [[ -n "$spec_check" ]] && [[ -f "$spec_check" ]] && \
-           [[ -n "$progress_check" ]] && [[ -f "$progress_check" ]]; then
+        prd_check="${PRD_PATH:-$EXPECTED_PRD}"
+        spec_check="${SPEC_PATH:-$EXPECTED_SPEC}"
+        progress_check="${PROGRESS_PATH:-$EXPECTED_PROGRESS}"
+        if [[ -f "$prd_check" ]] && [[ -f "$spec_check" ]] && [[ -f "$progress_check" ]]; then
           echo "✅ Loop (prd): Phase 6 - All PRD files exist. Completing loop." >&2
           notify "Loop (prd)" "PRD complete for $FEATURE_NAME!"
           rm "$STATE_FILE"
@@ -1402,92 +1455,46 @@ reviews_complete: true" "$STATE_FILE"
   fi
 
   if [[ -z "$NEXT_PHASE" ]] && [[ "$VALID_MARKER_FOUND" != "true" ]]; then
-    # No valid marker found - increment retry count
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    sed_inplace "s/^retry_count: .*/retry_count: $RETRY_COUNT/" "$STATE_FILE"
+    # No valid marker found - increment phase iteration (ralph-loop style: never stop, just keep prompting)
+    PHASE_ITERATION=$((PHASE_ITERATION + 1))
 
-    # Compact error summary (first 100 chars of output or "no output")
-    if [[ -n "$INVALID_NEXT_REASON" ]]; then
-      ERROR_SUMMARY="$INVALID_NEXT_REASON"
-    elif [[ -n "$LAST_OUTPUT" ]]; then
-      ERROR_SUMMARY=$(echo "$LAST_OUTPUT" | head -c 200 | LC_ALL=C tr '\n' ' ' | sed 's/"/\\"/g')
+    # Update or add phase_iteration field
+    if grep -q '^phase_iteration:' "$STATE_FILE"; then
+      sed_inplace "s/^phase_iteration: .*/phase_iteration: $PHASE_ITERATION/" "$STATE_FILE"
     else
-      ERROR_SUMMARY="No text output from Claude (only tool calls)"
+      sed_inplace "2i\\
+phase_iteration: $PHASE_ITERATION" "$STATE_FILE"
     fi
-    # Escape for sed replacement to handle /, &, \ in error messages
-    ESCAPED_ERROR=$(escape_sed_replacement "$ERROR_SUMMARY")
-    sed_inplace "s/^last_error: .*/last_error: \"$ESCAPED_ERROR\"/" "$STATE_FILE"
 
-    if [[ $RETRY_COUNT -ge $MAX_RETRIES ]]; then
-      # Max retries reached - stop and ask user for help
-      echo "⚠️  Loop (prd): Phase $CURRENT_PHASE failed after $MAX_RETRIES attempts" >&2
-      echo "" >&2
-      echo "   Expected marker: $EXPECTED_MARKER" >&2
-      echo "   Last output: ${ERROR_SUMMARY:0:100}..." >&2
-      echo "" >&2
-      echo "   The loop is pausing for your help." >&2
-      echo "   Options:" >&2
-      echo "     - Check Claude's output and guide it to produce the marker" >&2
-      echo "     - Run /cancel-prd to stop the loop" >&2
-      echo "     - Manually edit the state file to advance phase" >&2
-      notify "Loop (prd)" "Phase $CURRENT_PHASE needs help after $MAX_RETRIES retries"
-
-      # Don't delete state file - let user intervene
-      # Return a prompt asking for the expected output
-      RECOVERY_PROMPT="# PRD Loop: Recovery Needed
-
-**Phase $CURRENT_PHASE failed after $MAX_RETRIES attempts.**
-
-I couldn't find the expected output marker in your response.
-
-**Expected:** \`$EXPECTED_MARKER\`
-
-**What I saw:** ${ERROR_SUMMARY:0:200}
-
-## Please Help
-
-Either:
-1. Output the expected marker now
-2. Tell me what's blocking you so I can help
-
-$(generate_prd_phase_prompt "$CURRENT_PHASE")"
-
-      jq -n \
-        --arg prompt "$RECOVERY_PROMPT" \
-        --arg msg "⚠️  Loop (prd): Phase $CURRENT_PHASE needs help - no valid marker found after $MAX_RETRIES attempts" \
-        '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-      exit 0
+    # Build system message - just inform, don't stop
+    if [[ -n "$INVALID_NEXT_REASON" ]]; then
+      SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE iteration $PHASE_ITERATION - $INVALID_NEXT_REASON"
+    elif [[ $PHASE_ITERATION -eq 1 ]]; then
+      SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE - continuing"
     else
-      # Retry - continue with same phase prompt + hint
-      if [[ -n "$INVALID_NEXT_REASON" ]]; then
-        SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE retry $RETRY_COUNT/$MAX_RETRIES - invalid next phase"
-      else
-        SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE retry $RETRY_COUNT/$MAX_RETRIES - expected marker not found"
-      fi
-      PROMPT_TEXT=$(generate_prd_phase_prompt "$CURRENT_PHASE")
-      if [[ -n "$INVALID_NEXT_REASON" ]]; then
-        PROMPT_TEXT="$PROMPT_TEXT
+      SYSTEM_MSG="🔄 Loop (prd): Phase $CURRENT_PHASE iteration $PHASE_ITERATION - work in progress"
+    fi
+
+    # Generate phase prompt
+    PROMPT_TEXT=$(generate_prd_phase_prompt "$CURRENT_PHASE")
+
+    # Add gentle reminder only after first iteration (not aggressive)
+    if [[ $PHASE_ITERATION -gt 1 ]] && [[ -n "$INVALID_NEXT_REASON" ]]; then
+      PROMPT_TEXT="$PROMPT_TEXT
 
 ---
 **Note:** $INVALID_NEXT_REASON"
-      else
-        PROMPT_TEXT="$PROMPT_TEXT
-
----
-**Note:** Previous attempt didn't include the expected marker. Please ensure your response ends with:
-\`$EXPECTED_MARKER\`"
-      fi
-
-      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-      exit 0
     fi
+
+    jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+    exit 0
   fi
 
   # Update state file with new phase
   sed_inplace "s/^current_phase: .*/current_phase: \"$NEXT_PHASE\"/" "$STATE_FILE"
 
-  # Reset retry counter on successful phase transition
-  sed_inplace "s/^retry_count: .*/retry_count: 0/" "$STATE_FILE"
+  # Reset phase iteration on successful phase transition
+  sed_inplace "s/^phase_iteration: .*/phase_iteration: 0/" "$STATE_FILE"
 
   # Update feature_name if changed (escape for sed to handle special chars)
   ESCAPED_FEATURE=$(escape_sed_replacement "$FEATURE_NAME")
@@ -1612,29 +1619,8 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
     [[ "$reconciled" == "true" ]]
   }
 
-  # Run reconciliation
-  ALL_STORIES_COMPLETE=false
-  if reconcile_prd_state "$STATE_FILE" "$PRD_PATH" "$CURRENT_STORY_ID"; then
-    # State was reconciled - re-read frontmatter
-    FRONTMATTER=$(parse_frontmatter "$STATE_FILE")
-    CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
-    TOTAL_STORIES=$(get_field "$FRONTMATTER" "total_stories")
-  fi
-
-  # Handle all-stories-complete from reconciliation
-  if [[ "$ALL_STORIES_COMPLETE" == "true" ]]; then
-    echo "✅ Loop (go/prd): All stories complete! (detected via reconciliation)"
-    echo "   Feature '$FEATURE_NAME' is done."
-    notify "Loop (go/prd)" "All stories complete! $FEATURE_NAME done"
-    if [[ -f "$PROGRESS_PATH" ]]; then
-      echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"COMPLETED\",\"notes\":\"All stories complete (reconciled from prd.json)\"}" >> "$PROGRESS_PATH"
-    fi
-    show_loop_summary "$STATE_FILE" "$ITERATION"
-    rm "$STATE_FILE"
-    exit 0
-  fi
-
-  # Parse structured output markers
+  # Parse structured output markers FIRST (before reconciliation)
+  # This ensures we honor Claude's explicit markers over auto-reconciliation
   REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
   STORY_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<story_complete[^>]*story_id="([^"]+)"')
   CURRENT_PASSES=$(jq ".stories[] | select(.id == $CURRENT_STORY_ID) | .passes" "$PRD_PATH" 2>/dev/null || echo "false")
@@ -1646,19 +1632,19 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
       PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
 
       if [[ "$CURRENT_PASSES" != "true" ]]; then
-        SYSTEM_MSG="🔄 Loop (go/prd): Story #$CURRENT_STORY_ID not yet passing.
+        SYSTEM_MSG="🔄 Loop (go/prd): Story #$CURRENT_STORY_ID - working on verification steps.
 
-**When verification steps pass, update prd.json:**
+**When steps pass, update prd.json:**
 Edit \`$PRD_PATH\` → find story id:$CURRENT_STORY_ID → set \"passes\": true
 
 Then run reviews and output markers."
       elif [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
-        SYSTEM_MSG="⚠️  Loop (go/prd): Story #$CURRENT_STORY_ID passes but REVIEWS NOT run.
+        SYSTEM_MSG="🔄 Loop (go/prd): Story #$CURRENT_STORY_ID passes ✓ Now run reviews.
 
-**REQUIRED steps:**
+**Steps:**
 1. Run code-simplifier: \`pr-review-toolkit:code-simplifier\` (max_turns: 15)
 2. Run Kieran reviewer for your code type (max_turns: 20)
-3. Address ALL findings
+3. Address findings
 4. Output: \`<reviews_complete/>\`
 5. Commit with story reference
 6. Output: \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
@@ -1671,7 +1657,7 @@ Then run reviews and output markers."
           STORY_COMPLETE_MARKER="$CURRENT_STORY_ID"
           # Fall through to normal completion logic below
         else
-          SYSTEM_MSG="⚠️  Loop (go/prd): Reviews done ✓ Story passes ✓ Now commit and output:
+          SYSTEM_MSG="🔄 Loop (go/prd): Reviews done ✓ Story passes ✓ Now commit and output:
 \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
           jq -n \
             --arg prompt "$PROMPT_TEXT" \
@@ -1694,18 +1680,18 @@ Then run reviews and output markers."
     # Step 2: Verify story_complete marker matches current story
     if [[ "$STORY_COMPLETE_MARKER" != "$CURRENT_STORY_ID" ]]; then
       PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-      SYSTEM_MSG="⚠️  Loop (go/prd): story_id mismatch. Expected $CURRENT_STORY_ID, got $STORY_COMPLETE_MARKER"
+      SYSTEM_MSG="🔄 Loop (go/prd): story_id mismatch. Expected $CURRENT_STORY_ID, got $STORY_COMPLETE_MARKER"
       jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
       exit 0
     fi
 
     # Step 3: Verify prd.json shows passes: true
     if [[ "$CURRENT_PASSES" != "true" ]]; then
-      PROMPT_TEXT="**BLOCKED: prd.json not updated**
+      PROMPT_TEXT="**prd.json needs update**
 
 You output \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\` but prd.json still shows \`passes: false\` for story #$CURRENT_STORY_ID.
 
-**Fix with this exact edit:**
+**Fix with this edit:**
 \`\`\`
 File: $PRD_PATH
 Find story with id: $CURRENT_STORY_ID
@@ -1713,14 +1699,9 @@ Change: \"passes\": false
 To:     \"passes\": true
 \`\`\`
 
-Or use jq:
-\`\`\`bash
-jq '(.stories[] | select(.id == $CURRENT_STORY_ID)) .passes = true' \"$PRD_PATH\" > tmp.json && mv tmp.json \"$PRD_PATH\"
-\`\`\`
-
 After updating prd.json, output the marker again:
 \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
-      SYSTEM_MSG="⚠️  Loop (go/prd): prd.json shows passes: false. Update it first, then re-output story_complete marker."
+      SYSTEM_MSG="🔄 Loop (go/prd): prd.json shows passes: false. Update it, then re-output story_complete marker."
       jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
       exit 0
     fi
@@ -1728,7 +1709,7 @@ After updating prd.json, output the marker again:
     # Step 4: Verify reviews were run
     if [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
       PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-      SYSTEM_MSG="⚠️  Loop (go/prd): <story_complete/> found but <reviews_complete/> missing. Run reviews first."
+      SYSTEM_MSG="🔄 Loop (go/prd): <story_complete/> found but <reviews_complete/> missing. Run reviews first."
       jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
       exit 0
     fi
@@ -1918,11 +1899,11 @@ CRITICAL: Only mark the story as passing when it genuinely passes all verificati
         NEXT_ITERATION=$((ITERATION + 1))
         update_iteration "$STATE_FILE" "$NEXT_ITERATION"
 
-        PROMPT_TEXT="**BLOCKED: No commit found for story #$CURRENT_STORY_ID**
+        PROMPT_TEXT="**Commit needed for story #$CURRENT_STORY_ID**
 
 All checks pass except commit verification. The hook scans the last 10 commits for a reference to story #$CURRENT_STORY_ID.
 
-**Create commit with this format:**
+**Create commit:**
 \`\`\`bash
 git add -A && git commit -m \"feat($FEATURE_NAME): story #$CURRENT_STORY_ID - $STORY_TITLE\"
 \`\`\`
@@ -1934,7 +1915,7 @@ git add -A && git commit -m \"feat($FEATURE_NAME): story #$CURRENT_STORY_ID - $S
 
 After committing, output:
 \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
-        SYSTEM_MSG="⚠️  Loop (go/prd): Story passes ✓ Reviews done ✓ NO COMMIT found. See prompt for exact command."
+        SYSTEM_MSG="🔄 Loop (go/prd): Story passes ✓ Reviews done ✓ Now commit with story reference."
 
         jq -n \
           --arg prompt "$PROMPT_TEXT" \
@@ -1952,17 +1933,36 @@ if [[ "$ACTIVE_LOOP" == "ut" ]] || [[ "$ACTIVE_LOOP" == "e2e" ]]; then
   REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
   ITER_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<iteration_complete[^>]*test_file="([^"]+)"')
 
-  # Step 1: Check for reviews_complete marker (MANDATORY)
+  # Fallback detection: Check for test commit in git log (ralph-loop style)
+  # If test commit exists but markers missing, we can still advance
+  TEST_COMMIT_FOUND=false
+  TEST_COMMIT_FILE=""
+  if [[ "$ACTIVE_LOOP" == "ut" ]]; then
+    # Look for test commits (test: or test(scope): formats)
+    if git log --oneline -5 2>/dev/null | grep -qiE "^[a-f0-9]+ test[:(]"; then
+      TEST_COMMIT_FOUND=true
+      # Try to extract test file from recent commit
+      TEST_COMMIT_FILE=$(git diff --name-only HEAD~1 2>/dev/null | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' | head -1 || echo "")
+    fi
+  elif [[ "$ACTIVE_LOOP" == "e2e" ]]; then
+    # Look for test or e2e commits (test: or test(scope): formats)
+    if git log --oneline -5 2>/dev/null | grep -qiE "^[a-f0-9]+ (test|e2e)[:(]"; then
+      TEST_COMMIT_FOUND=true
+      TEST_COMMIT_FILE=$(git diff --name-only HEAD~1 2>/dev/null | grep -E '\.(e2e|spec|test)\.(ts|tsx|js|jsx)$' | head -1 || echo "")
+    fi
+  fi
+
+  # Step 1: Check for reviews_complete marker (MANDATORY - quality gate, no fallback)
   if [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
     PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-    SYSTEM_MSG="⚠️  Loop ($ACTIVE_LOOP): Reviews NOT run. You MUST run reviewers before completing iteration.
+    SYSTEM_MSG="🔄 Loop ($ACTIVE_LOOP): Reviews not yet run. Run reviewers before completing iteration.
 
-**REQUIRED steps:**
+**Steps:**
 1. Run code-simplifier: \`pr-review-toolkit:code-simplifier\` (max_turns: 15)
 2. Run Kieran reviewer for your code type (max_turns: 20)
-3. Address ALL findings
+3. Address findings
 4. Output: \`<reviews_complete/>\`
-5. Then commit and output: \`<iteration_complete test_file=\"...\"/>\`"
+5. Commit and output: \`<iteration_complete test_file=\"...\"/>\`"
 
     jq -n \
       --arg prompt "$PROMPT_TEXT" \
@@ -1971,27 +1971,35 @@ if [[ "$ACTIVE_LOOP" == "ut" ]] || [[ "$ACTIVE_LOOP" == "e2e" ]]; then
     exit 0
   fi
 
-  # Step 2: Check for iteration_complete marker
+  # Step 2: Check for iteration_complete marker OR fallback to git detection
   if [[ -z "$ITER_COMPLETE_MARKER" ]]; then
-    PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-    SYSTEM_MSG="⚠️  Loop ($ACTIVE_LOOP): Reviews done ✓ but iteration incomplete. Commit your test, then output: <iteration_complete test_file=\"path/to/test.ts\"/>"
+    if [[ "$TEST_COMMIT_FOUND" == "true" ]]; then
+      # Fallback: Test commit exists but marker missing - auto-advance
+      echo "⚠️  Loop ($ACTIVE_LOOP): AUTO-ADVANCE - reviews ✓ test commit ✓ (marker missing but work complete)" >&2
+      ITER_COMPLETE_MARKER="${TEST_COMMIT_FILE:-auto-detected}"
+      # Fall through to success path
+    else
+      # No marker and no test commit - continue working
+      PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+      SYSTEM_MSG="🔄 Loop ($ACTIVE_LOOP): Reviews done ✓ Commit your test, then output: <iteration_complete test_file=\"path/to/test.ts\"/>"
 
-    jq -n \
-      --arg prompt "$PROMPT_TEXT" \
-      --arg msg "$SYSTEM_MSG" \
-      '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-    exit 0
+      jq -n \
+        --arg prompt "$PROMPT_TEXT" \
+        --arg msg "$SYSTEM_MSG" \
+        '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
   fi
 
-  # Step 3: Verify commit exists
-  if git log --oneline -5 2>/dev/null | grep -qiE "^[a-f0-9]+ test"; then
+  # Step 3: Verify commit exists (or already verified via fallback)
+  if [[ "$TEST_COMMIT_FOUND" == "true" ]] || git log --oneline -5 2>/dev/null | grep -qiE "^[a-f0-9]+ (test|e2e)[:(]"; then
     # All checks passed - log and continue to advance
-    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION_VERIFIED\",\"iteration\":$ITERATION,\"test_file\":\"$ITER_COMPLETE_MARKER\",\"notes\":\"Iteration $ITERATION complete - reviews, marker, and commit verified\"}"
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION_VERIFIED\",\"iteration\":$ITERATION,\"test_file\":\"$ITER_COMPLETE_MARKER\",\"notes\":\"Iteration $ITERATION complete - reviews, marker/fallback, and commit verified\"}"
     echo "✓ Loop ($ACTIVE_LOOP): Iteration $ITERATION complete - reviews ✓ commit ✓ $ITER_COMPLETE_MARKER"
   else
-    # Markers but no commit - remind to commit
+    # Markers but no commit - continue working
     PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-    SYSTEM_MSG="⚠️  Loop ($ACTIVE_LOOP): Reviews done ✓ but NO COMMIT found. Commit your test: git add && git commit -m \"test(...): ...\""
+    SYSTEM_MSG="🔄 Loop ($ACTIVE_LOOP): Reviews done ✓ Commit your test: git add && git commit -m \"test(...): ...\""
 
     jq -n \
       --arg prompt "$PROMPT_TEXT" \

@@ -34,20 +34,20 @@ This happens in bash before Claude starts working.
 
 ## Structured Output Control Flow
 
-The stop hook parses your output for specific XML markers. **You MUST output the exact marker format** to advance. Missing markers block progression with guidance.
+The stop hook uses **markers as signals, with git-based fallback detection**. If you complete the work but forget a marker, the hook can detect test commits and auto-advance.
 
 ### Required Markers (in order)
 
-| Step | Marker | When |
-|------|--------|------|
-| 1 | `<reviews_complete/>` | After running reviewers and addressing findings |
-| 2 | `<iteration_complete test_file="..."/>` | After committing test |
-| 3 | `<promise>TEXT</promise>` | When coverage target reached (to exit loop) |
+| Step | Marker | Fallback |
+|------|--------|----------|
+| 1 | `<reviews_complete/>` | **None** (quality gate, always required) |
+| 2 | `<iteration_complete test_file="..."/>` | Auto-detects from git log if test commit exists |
+| 3 | `<promise>TEXT</promise>` | None (explicit exit signal) |
 
 ### Exact Marker Formats
 
 ```xml
-<!-- After running reviewers -->
+<!-- After running reviewers (REQUIRED - no fallback) -->
 <reviews_complete/>
 
 <!-- After committing (include actual test file path) -->
@@ -57,11 +57,11 @@ The stop hook parses your output for specific XML markers. **You MUST output the
 <promise>COVERAGE COMPLETE</promise>
 ```
 
-### Validation Rules
+### Detection Priority
 
-1. **reviews marker required first** - Cannot advance without `<reviews_complete/>`
-2. **test_file attribute required** - Hook logs progress with this path
-3. **Commit must exist** - Pattern: `test(...):` in recent commits
+1. **Markers are explicit signals** - Take precedence when present
+2. **Git fallback for iteration** - If `test(` commit exists but marker missing, auto-advances
+3. **Reviews always required** - No fallback (quality gate)
 4. **Last marker wins** - If examples appear in docs, only LAST occurrence counts
 
 ---
