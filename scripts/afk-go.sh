@@ -736,18 +736,33 @@ parse_args() {
 
 preflight_checks() {
   # Check claude is available
+  if ! command -v claude &>/dev/null; then
+    log_error "Claude CLI not found. Install with: curl -fsSL https://claude.ai/install.sh | bash"
+    exit 1
+  fi
+  log_verbose "Claude CLI available"
+
+  # Check sandbox mode requirements
   if [[ "$SANDBOX" == "true" ]]; then
     if ! command -v docker &>/dev/null; then
-      log_error "Docker not found. Install Docker Desktop or remove --sandbox flag."
+      log_error "Docker not found. Install Docker Desktop 4.50+ or remove --sandbox flag."
       exit 1
     fi
-    log_verbose "Docker available for sandbox mode"
-  else
-    if ! command -v claude &>/dev/null; then
-      log_error "Claude CLI not found. Install with: curl -fsSL https://claude.ai/install.sh | bash"
+
+    # Verify docker sandbox is available (Docker Desktop 4.50+ feature)
+    if ! docker sandbox --help &>/dev/null 2>&1; then
+      log_error "docker sandbox not available."
+      echo ""
+      echo "The --sandbox flag requires Docker Desktop 4.50+ with the sandbox feature."
+      echo "See: https://docs.docker.com/desktop/features/sandbox/"
+      echo ""
+      echo "Options:"
+      echo "  1. Update Docker Desktop to 4.50+ and enable sandbox feature"
+      echo "  2. Remove --sandbox flag to run directly"
+      echo ""
       exit 1
     fi
-    log_verbose "Claude CLI available"
+    log_verbose "Docker sandbox available"
   fi
 
   # Check jq for streaming

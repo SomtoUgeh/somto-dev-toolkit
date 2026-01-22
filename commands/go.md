@@ -51,9 +51,9 @@ External bash loop for truly hands-off execution. Ralph Wiggum style.
 ```
 /go plans/auth/prd.json --afk                    # External loop, default 50 iterations
 /go plans/auth/prd.json --afk --max 30           # Limit to 30 iterations
-/go plans/auth/prd.json --afk --stream           # Real-time output visibility
-/go plans/auth/prd.json --afk --sandbox          # Docker sandbox for safety
-/go plans/auth/prd.json --afk --stream --sandbox # Recommended for overnight runs
+/go plans/auth/prd.json --afk --stream           # Real-time output visibility (recommended)
+/go plans/auth/prd.json --afk --sandbox          # Docker sandbox (requires Desktop 4.50+)
+/go plans/auth/prd.json --afk --stream --sandbox # Sandbox + streaming
 ```
 
 **Key differences from HITL:**
