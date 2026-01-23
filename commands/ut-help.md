@@ -78,7 +78,6 @@ The loop automatically detects:
 6. Run coverage again
 7. **Run parallel reviews** (code-simplifier + Kieran reviewer in single message)
 8. Commit: `test(<file>): <describe behavior>`
-9. Log to `.claude/ut-progress.txt`
 
 ## Branch Setup
 
@@ -93,8 +92,8 @@ The loop stops when:
 
 ## Files Created
 
-- `.claude/ut-loop-<session>.local.md` - State file (iteration, config, prompt)
-- `.claude/ut-progress.txt` - Progress log (JSONL format)
+- `.claude/ut-loop-<session>.local.md` - State file (mode, config, prompt)
+- `.claude/ut-state-<session>.json` - State with embedded progress log
 
 ## React Testing Library Best Practices
 

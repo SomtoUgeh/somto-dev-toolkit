@@ -30,6 +30,7 @@ For any iterative task. Loops until you output the completion promise.
 
 ### PRD Mode
 For PRD-based development. Auto-detects `.json` files or `--prd` flag.
+State is stored in prd.json itself (single source of truth - no separate progress.txt).
 
 ```
 /go plans/auth/prd.json
@@ -58,7 +59,7 @@ External bash loop for truly hands-off execution. Ralph Wiggum style.
 
 **Key differences from HITL:**
 - Each iteration is a **fresh Claude session** (prevents context rot)
-- State persists in **files only** (prd.json, progress.txt)
+- State persists in **prd.json only** (single source of truth)
 - No hook-based continuation - external bash for loop
 - Optional streaming output via jq for visibility while AFK
 - Optional Docker sandbox for safety
@@ -101,11 +102,11 @@ The stop hook uses **markers as signals, with fallback detection** for resilienc
 
 ### Marker Summary by Mode
 
-| Mode | Marker | Fallback |
-|------|--------|----------|
-| Generic | `<promise>TEXT</promise>` | None (explicit exit) |
-| PRD | `<reviews_complete/>` | **None** (quality gate) |
-| PRD | `<story_complete story_id="N"/>` | prd.json passes + commit → auto-advances |
+| Mode | Marker | Status | Fallback |
+|------|--------|--------|----------|
+| Generic | `<promise>TEXT</promise>` | Required | None (explicit exit) |
+| PRD | `<reviews_complete/>` | Required | **None** (quality gate) |
+| PRD | `<story_complete story_id="N"/>` | Optional | prd.json passes + commit → auto-advances |
 
 ### PRD Mode Control Flow
 
@@ -115,8 +116,10 @@ The hook validates these conditions before advancing to next story:
 1. prd.json shows passes: true for current story
 2. <reviews_complete/> marker in output (REQUIRED - no fallback)
 3. Git commit exists with story reference (e.g., "story #N")
-4. <story_complete story_id="N"/> marker in output (or auto-detected from above)
+4. <story_complete story_id="N"/> marker (optional - auto-detected from above)
 ```
+
+**State Management**: prd.json IS the source of truth. Current story is derived as the first story with `passes: false` (sorted by priority). Progress log is embedded in prd.json's `log` array.
 
 **Fallback detection**: If story passes in prd.json AND commit exists but marker missing, hook auto-advances.
 
@@ -183,23 +186,24 @@ All agents run in parallel → results return together → faster reviews.
 
 ```
 # 1. Implement the story
-# 2. Update prd.json: set passes: true for story 1
-
+# 2. Run tests, lint, typecheck
 # 3. Run reviewers IN PARALLEL (single message, multiple Task calls)
 Task(subagent_type="pr-review-toolkit:code-simplifier", max_turns: 15)
 Task(subagent_type="compound-engineering:review:kieran-typescript-reviewer", max_turns: 20)
-# Both run simultaneously, results return together
 
 # 4. Address ALL findings from both reviewers
-# 5. Output reviews marker
+# 5. Output reviews marker (REQUIRED)
 <reviews_complete/>
 
-# 6. Commit
+# 6. Update prd.json: set passes: true for story 1
+# 7. Commit with story reference
 git commit -m "feat(auth): story #1 - implement login form"
 
-# 7. Output story completion
+# 8. Output story completion (optional - hook auto-detects from prd.json + commit)
 <story_complete story_id="1"/>
 ```
+
+**Hook handles automatically:** Updates story's `completed_at` and `commit` fields, appends to prd.json's `log` array.
 
 ---
 

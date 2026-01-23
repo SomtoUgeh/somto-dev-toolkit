@@ -1,7 +1,7 @@
 ---
 name: cancel-go
 description: "Cancel active go loop"
-allowed-tools: ["Bash(ls .claude/go-loop-*.local.md:*)", "Bash(rm .claude/go-loop-*.local.md)", "Read(.claude/go-loop-*.local.md)", "Bash(echo *>>*)"]
+allowed-tools: ["Bash(ls .claude/go-loop-*.local.md:*)", "Bash(rm .claude/go-loop-*.local.md)", "Read(.claude/go-loop-*.local.md)", "Bash(jq *)"]
 hide-from-slash-command-tool: "true"
 ---
 
@@ -17,16 +17,15 @@ To cancel the go loop:
 2. **If NONE**: Say "No active go loop found in this project."
 
 3. **If file(s) found**:
-   - Read the FIRST state file to get: `iteration`, `mode`, `progress_path`, `started_at`, and (if PRD) `current_story_id`
-   - Log CANCELLED to progress file:
-     - **If PRD mode**:
+   - Read the FIRST state file to get: `mode`, `started_at`, `prd_path` (if PRD mode)
+   - Log CANCELLED to embedded log:
+     - **If PRD mode** (prd_path exists):
        ```bash
-       echo '{"ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","story_id":STORY_ID,"status":"CANCELLED","notes":"User cancelled at iteration N"}' >> PROGRESS_PATH
+       jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+         '.log += [{"ts": $ts, "event": "cancelled", "notes": "User cancelled go loop"}]' \
+         "$PRD_PATH" > /tmp/cancel_prd.tmp && mv /tmp/cancel_prd.tmp "$PRD_PATH"
        ```
-     - **If generic mode** (progress_path exists):
-       ```bash
-       echo '{"ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","status":"CANCELLED","iteration":N,"notes":"User cancelled go loop"}' >> PROGRESS_PATH
-       ```
+     - **If generic mode**: No state JSON to update (state is in local.md only)
    - Remove ALL go-loop state files: `rm .claude/go-loop-*.local.md`
    - Show summary and report cancellation:
      ```

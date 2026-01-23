@@ -45,7 +45,7 @@ The hook uses **file existence as primary truth** (ralph-loop pattern). Markers 
 | 3.2 | Skill Enrichment | `<phase_complete phase="3.2"/>` | none | 3.5 |
 | 3.5 | Review Gate | `<reviews_complete/>` then `<gate_decision>` | PROCEED or BLOCK | 4 (if PROCEED) |
 | 4 | PRD Generation | `<phase_complete phase="4"/>` | `prd_path` (required) | 5 |
-| 5 | Progress File | `<phase_complete phase="5"/>` | `progress_path` (required) | 5.5 |
+| 5 | Verify PRD | `<phase_complete phase="5"/>` | none | 5.5 |
 | 5.5 | Complexity | `<max_iterations>` | integer N | 6 |
 | 6 | Go Command | `<phase_complete phase="6"/>` | none | done |
 
@@ -54,7 +54,7 @@ The hook uses **file existence as primary truth** (ralph-loop pattern). Markers 
 1. **File existence is truth** - If `plans/<feature>/spec.md` exists, phase 3 is considered complete
 2. **Markers are explicit signals** - Still work and take precedence when present
 3. **Last marker wins** - If docs/examples contain markers, only the LAST occurrence counts
-4. **Auto-discovery** - Paths follow convention: `plans/<feature>/{spec.md,prd.json,progress.txt}`
+4. **Auto-discovery** - Paths follow convention: `plans/<feature>/{spec.md,prd.json}`
 5. **Continuous loop** - Never stops on missing markers; keeps prompting until work is done
 6. **Phase 3.5 gate** - No file-based auto-advance; requires explicit `<gate_decision>`
 
@@ -66,7 +66,7 @@ The hook uses **file existence as primary truth** (ralph-loop pattern). Markers 
 | 3.2 | spec.md contains "## Implementation Patterns" |
 | 3.5 | No auto-advance (requires `<reviews_complete/>` + `<gate_decision>`) |
 | 4 | `plans/<feature>/prd.json` exists and is valid JSON |
-| 5 | `plans/<feature>/progress.txt` exists |
+| 5 | `plans/<feature>/prd.json` has `log` array |
 | 5.5 | `prd.json` contains `max_iterations` field (any positive integer) |
 | 6 | All three files exist → **loop complete** |
 
@@ -107,7 +107,7 @@ The hook uses **file existence as primary truth** (ralph-loop pattern). Markers 
 <phase_complete phase="4" prd_path="plans/auth-feature/prd.json"/>
 
 <!-- Phase 5 -->
-<phase_complete phase="5" progress_path="plans/auth-feature/progress.txt"/>
+<phase_complete phase="5"/>
 
 <!-- Phase 5.5 (MUST use agent's value, not guess) -->
 <max_iterations>25</max_iterations>
@@ -270,7 +270,7 @@ If BLOCK, address issues then re-output PROCEED.
 
 ### Phase 4: PRD JSON Generation
 
-Generate `plans/<feature>/prd.json` with atomic stories.
+Generate `plans/<feature>/prd.json` with **atomic** stories.
 
 **Story size rules (ENFORCE):**
 - Each story = ONE iteration (~15-30 min)
@@ -278,10 +278,12 @@ Generate `plans/<feature>/prd.json` with atomic stories.
 - If >3 files touched → consider splitting
 - If "and" in title → probably 2 stories
 
-**prd.json schema:**
+**prd.json schema (single source of truth):**
 ```json
 {
   "title": "feature-name",
+  "spec_path": "plans/<feature>/spec.md",
+  "created_at": "ISO8601",
   "stories": [
     {
       "id": 1,
@@ -290,11 +292,12 @@ Generate `plans/<feature>/prd.json` with atomic stories.
       "skills": ["skill-name-1", "skill-name-2"],
       "steps": ["Step 1", "Step 2", "..."],
       "passes": false,
-      "priority": 1
+      "priority": 1,
+      "completed_at": null,
+      "commit": null
     }
   ],
-  "created_at": "ISO8601",
-  "source_spec": "plans/<feature>/spec.md"
+  "log": []
 }
 ```
 
@@ -308,23 +311,21 @@ Generate `plans/<feature>/prd.json` with atomic stories.
 
 **Output:** `<phase_complete phase="4" prd_path="plans/<feature>/prd.json"/>`
 
-### Phase 5: Progress File
+### Phase 5: Verify PRD Structure
 
-Create `plans/<feature>/progress.txt`:
+Verify prd.json has required structure:
+- `log` array exists (initialized empty, hook appends)
+- All stories have `completed_at: null` and `commit: null`
 
-```
-# Progress Log: <feature_name>
-# Each line: JSON object with ts, story_id, status, notes
-# Status values: STARTED, PASSED, FAILED, BLOCKED
-```
-
-The /go loop appends JSON lines:
+The /go loop will append log entries like:
 ```json
-{"ts":"2026-01-21T12:30:00Z","story_id":1,"status":"STARTED","notes":"Beginning story #1"}
-{"ts":"2026-01-21T12:45:00Z","story_id":1,"status":"PASSED","notes":"Story #1 complete"}
+{"ts":"2026-01-21T12:30:00Z","event":"story_started","story_id":1}
+{"ts":"2026-01-21T12:45:00Z","event":"story_complete","story_id":1,"commit":"abc123"}
 ```
 
-**Output:** `<phase_complete phase="5" progress_path="plans/<feature>/progress.txt"/>`
+**NOTE:** No separate progress.txt - log is embedded in prd.json.
+
+**Output:** `<phase_complete phase="5"/>`
 
 ### Phase 5.5: Complexity Estimation
 
@@ -399,7 +400,7 @@ Unlike retry-based loops, the PRD workflow **never stops on missing markers**:
 
 **Completion signals:**
 1. Phase 6 marker: `<phase_complete phase="6"/>`
-2. File detection: all three files exist in `plans/<feature>/`
+2. File detection: spec.md and prd.json exist in `plans/<feature>/`
 3. Explicit promise: `<promise>PRD COMPLETE</promise>` (immediate exit)
 
 ---

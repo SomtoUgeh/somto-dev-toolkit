@@ -36,13 +36,15 @@ This happens in bash before Claude starts working.
 
 The stop hook uses **markers as signals, with git-based fallback detection**. If you complete the work but forget a marker, the hook can detect test commits and auto-advance.
 
-### Required Markers (in order)
+### Marker Summary
 
-| Step | Marker | Fallback |
-|------|--------|----------|
-| 1 | `<reviews_complete/>` | **None** (quality gate, always required) |
-| 2 | `<iteration_complete test_file="..."/>` | Auto-detects from git log if test commit exists |
-| 3 | `<promise>TEXT</promise>` | None (explicit exit signal) |
+| Step | Marker | Status | Fallback |
+|------|--------|--------|----------|
+| 1 | `<reviews_complete/>` | Required | **None** (quality gate) |
+| 2 | `<iteration_complete test_file="..."/>` | Optional | Auto-detects from git log if test commit exists |
+| 3 | `<promise>TEXT</promise>` | Required | None (explicit exit signal) |
+
+**State Management**: State is stored in `.claude/ut-state-{session}.json` (single source of truth). Progress log is embedded - no separate progress.txt.
 
 ### Exact Marker Formats
 
@@ -91,11 +93,12 @@ Each iteration, you must:
    <reviews_complete/>
    ```
 9. **Commit** with message: `test(<file>): <describe behavior>`
-10. **Output iteration marker**:
+10. **Output iteration marker** (optional - hook auto-detects from git):
     ```
     <iteration_complete test_file="path/to/test.ts"/>
     ```
-11. **Log progress** to `.claude/ut-progress.txt`
+
+**Hook handles automatically:** Logs to state.json (don't touch it)
 
 ⚠️ The stop hook ENFORCES steps 6-8. You cannot advance without `<reviews_complete/>` marker.
 
@@ -132,7 +135,6 @@ Treat ALL code as production code. No shortcuts, no "good enough for now". Every
 - **User-facing behavior only** - test what users depend on, not implementation details
 - **Quality over quantity** - a great test catches regressions users would notice
 - **No coverage gaming** - if code isn't worth testing, use `/* v8 ignore */` instead
-- **Log progress** - Make sure to log progress to `.claude/ut-progress.txt` after each successful test run.
 - **Ensure code quality** - Run lint, format, and typecheck before committing
 
 ## Completion

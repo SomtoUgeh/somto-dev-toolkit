@@ -36,13 +36,15 @@ This happens in bash before Claude starts working.
 
 The stop hook uses **markers as signals, with git-based fallback detection**. If you complete the work but forget a marker, the hook can detect test commits and auto-advance.
 
-### Required Markers (in order)
+### Marker Summary
 
-| Step | Marker | Fallback |
-|------|--------|----------|
-| 1 | `<reviews_complete/>` | **None** (quality gate, always required) |
-| 2 | `<iteration_complete test_file="..."/>` | Auto-detects from git log if e2e/test commit exists |
-| 3 | `<promise>TEXT</promise>` | None (explicit exit signal) |
+| Step | Marker | Status | Fallback |
+|------|--------|--------|----------|
+| 1 | `<reviews_complete/>` | Required | **None** (quality gate) |
+| 2 | `<iteration_complete test_file="..."/>` | Optional | Auto-detects from git log if e2e/test commit exists |
+| 3 | `<promise>TEXT</promise>` | Required | None (explicit exit signal) |
+
+**State Management**: State is stored in `.claude/e2e-state-{session}.json` (single source of truth). Progress log is embedded - no separate progress.txt.
 
 ### Exact Marker Formats
 
@@ -91,11 +93,12 @@ Each iteration, you must:
    <reviews_complete/>
    ```
 9. **Commit** with message: `test(e2e): <describe the user flow>`
-10. **Output iteration marker**:
+10. **Output iteration marker** (optional - hook auto-detects from git):
     ```
     <iteration_complete test_file="path/to/test.e2e.ts"/>
     ```
-11. **Log progress** to `.claude/e2e-progress.txt`
+
+**Hook handles automatically:** Logs to state.json (don't touch it)
 
 ⚠️ The stop hook ENFORCES steps 6-8. You cannot advance without `<reviews_complete/>` marker.
 
@@ -115,7 +118,6 @@ Treat ALL code as production code. No shortcuts, no "good enough for now". Every
 - **Tests must be independent** - no shared state between tests
 - **Use semantic locators** - getByRole > getByLabel > getByText > getByTestId
 - **Create page objects** - keep tests concise by extracting setup to page objects
-- **Log progress** - Make sure to log progress to `.claude/e2e-progress.txt` after each successful test run.
 - **Ensure code quality** - Run lint, format, and typecheck before committing
 
 ## Completion

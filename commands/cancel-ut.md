@@ -1,7 +1,7 @@
 ---
 name: cancel-ut
 description: "Cancel active unit test loop"
-allowed-tools: ["Bash(ls .claude/ut-loop-*.local.md:*)", "Bash(rm .claude/ut-loop-*.local.md)", "Read(.claude/ut-loop-*.local.md)", "Bash(echo *>>*)"]
+allowed-tools: ["Bash(ls .claude/ut-loop-*.local.md:*)", "Bash(rm .claude/ut-loop-*.local.md)", "Read(.claude/ut-loop-*.local.md)", "Bash(jq *)"]
 hide-from-slash-command-tool: "true"
 ---
 
@@ -17,10 +17,12 @@ To cancel the unit test loop:
 2. **If NONE**: Say "No active unit test loop found in this project."
 
 3. **If file(s) found**:
-   - Read the FIRST state file to get: `iteration`, `progress_path`, `started_at`
-   - Log CANCELLED to progress file:
+   - Read the FIRST state file to get: `started_at`, `state_json`
+   - Log CANCELLED to state JSON (if state_json path available):
      ```bash
-     echo '{"ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","status":"CANCELLED","iteration":N,"notes":"User cancelled unit test loop"}' >> PROGRESS_PATH
+     jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+       '.log += [{"ts": $ts, "event": "cancelled", "notes": "User cancelled unit test loop"}]' \
+       "$STATE_JSON" > /tmp/cancel_state.tmp && mv /tmp/cancel_state.tmp "$STATE_JSON"
      ```
    - Remove ALL ut-loop state files: `rm .claude/ut-loop-*.local.md`
    - Show summary:

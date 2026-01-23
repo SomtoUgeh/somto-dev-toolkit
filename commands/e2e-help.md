@@ -142,8 +142,8 @@ projects: [
 
 ## Files Created
 
-- `.claude/e2e-loop-<session>.local.md` - State file (iteration, config, prompt)
-- `.claude/e2e-progress.txt` - Progress log (JSONL format)
+- `.claude/e2e-loop-<session>.local.md` - State file (mode, config, prompt)
+- `.claude/e2e-state-<session>.json` - State with embedded progress log
 
 ## Stopping the Loop
 

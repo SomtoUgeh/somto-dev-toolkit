@@ -48,7 +48,7 @@ For structured development with PRD files from `/prd`.
 **Features:**
 - Auto-detects `.json` files
 - Strict commit verification before advancing
-- Auto-logs to progress.txt
+- Logs embedded in prd.json (single source of truth)
 - Shows story progress in system messages
 
 ## HITL Mode (--once)
