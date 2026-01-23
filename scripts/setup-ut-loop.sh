@@ -261,29 +261,39 @@ SESSION_ID=$(cat .claude/.current_session 2>/dev/null || echo "default")
 # Branch setup - prompt user if on main/master
 prompt_feature_branch "test/unit-coverage"
 
-# Create progress file if it doesn't exist
-PROGRESS_FILE=".claude/ut-progress.txt"
-if [[ ! -f "$PROGRESS_FILE" ]]; then
-  echo "# Test Coverage Progress Log" > "$PROGRESS_FILE"
-  echo "# Format: JSONL - one entry per iteration" >> "$PROGRESS_FILE"
-  echo "" >> "$PROGRESS_FILE"
-fi
-
 # Quote completion promise for YAML
 COMPLETION_PROMISE_YAML="\"$COMPLETION_PROMISE\""
 
-# Create state file (session-scoped to prevent cross-instance interference)
+# Create state JSON file (single source of truth - no separate progress.txt)
+STATE_JSON=".claude/ut-state-${SESSION_ID}.json"
+cat > "$STATE_JSON" <<EOF
+{
+  "type": "ut",
+  "target_coverage": $TARGET_COVERAGE,
+  "test_command": "$TEST_COMMAND",
+  "completion_promise": "$COMPLETION_PROMISE",
+  "custom_prompt": "$CUSTOM_PROMPT",
+  "max_iterations": $MAX_ITERATIONS,
+  "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "iterations": [],
+  "log": [
+    {"ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "event": "loop_started", "target_coverage": $TARGET_COVERAGE}
+  ]
+}
+EOF
+
+# Create minimal state file for hook routing (points to state.json)
 STATE_FILE=".claude/ut-loop-${SESSION_ID}.local.md"
 cat > "$STATE_FILE" <<EOF
 ---
 loop_type: "ut"
 active: true
+state_json: "$STATE_JSON"
 iteration: 1
 max_iterations: $MAX_ITERATIONS
 target_coverage: $TARGET_COVERAGE
 test_command: "$TEST_COMMAND"
 completion_promise: $COMPLETION_PROMISE_YAML
-progress_path: "$PROGRESS_FILE"
 custom_prompt: "$CUSTOM_PROMPT"
 working_branch: "$WORKING_BRANCH"
 branch_setup_done: true
@@ -364,10 +374,10 @@ After committing, output this marker so the hook can verify and advance:
 
 The hook will:
 - Verify your commit exists
-- Log progress
+- Log to embedded state.json (don't touch it)
 - Advance to next iteration
 
-**If you don't output this marker, the iteration won't advance.**
+**Marker is optional** - hook auto-detects from git if test commit exists.
 
 ## Completion
 
@@ -418,9 +428,4 @@ echo "If you believe you're stuck or coverage target is unreachable, keep trying
 echo "The loop continues until the promise is GENUINELY TRUE."
 echo "========================================================================"
 
-# Log STARTED to progress file
-if [[ $TARGET_COVERAGE -gt 0 ]]; then
-  echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"STARTED\",\"target_coverage\":$TARGET_COVERAGE,\"notes\":\"Unit test loop started with ${TARGET_COVERAGE}% target\"}" >> "$PROGRESS_FILE"
-else
-  echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"STARTED\",\"notes\":\"Unit test loop started\"}" >> "$PROGRESS_FILE"
-fi
+# NOTE: Log entry already added when creating state.json above

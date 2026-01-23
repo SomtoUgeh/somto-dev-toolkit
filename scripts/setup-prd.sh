@@ -62,11 +62,12 @@ fi
 prompt_feature_branch "feat/$FEATURE_NAME"
 
 # Pre-compute expected paths (convention-based discovery)
+# NOTE: progress.txt removed - log is now embedded in prd.json
 EXPECTED_SPEC="plans/$FEATURE_NAME/spec.md"
 EXPECTED_PRD="plans/$FEATURE_NAME/prd.json"
-EXPECTED_PROGRESS="plans/$FEATURE_NAME/progress.txt"
 
 # Create state file with phase 1
+# NOTE: progress_path removed - log is embedded in prd.json
 cat > "$STATE_FILE" <<EOF
 ---
 loop_type: "prd"
@@ -79,7 +80,6 @@ input_path: "$INPUT_PATH"
 input_raw: "$INPUT"
 spec_path: "$EXPECTED_SPEC"
 prd_path: "$EXPECTED_PRD"
-progress_path: "$EXPECTED_PROGRESS"
 interview_questions: 0
 interview_wave: 1
 max_iterations: 0

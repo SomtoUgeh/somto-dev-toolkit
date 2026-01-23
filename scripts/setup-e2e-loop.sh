@@ -218,28 +218,38 @@ SESSION_ID=$(cat .claude/.current_session 2>/dev/null || echo "default")
 # Branch setup - prompt user if on main/master
 prompt_feature_branch "test/e2e-coverage"
 
-# Create progress file if it doesn't exist
-PROGRESS_FILE=".claude/e2e-progress.txt"
-if [[ ! -f "$PROGRESS_FILE" ]]; then
-  echo "# E2E Test Progress Log" > "$PROGRESS_FILE"
-  echo "# Format: JSONL - one entry per iteration" >> "$PROGRESS_FILE"
-  echo "" >> "$PROGRESS_FILE"
-fi
-
 # Quote completion promise for YAML
 COMPLETION_PROMISE_YAML="\"$COMPLETION_PROMISE\""
 
-# Create state file (session-scoped to prevent cross-instance interference)
+# Create state JSON file (single source of truth - no separate progress.txt)
+STATE_JSON=".claude/e2e-state-${SESSION_ID}.json"
+cat > "$STATE_JSON" <<EOF
+{
+  "type": "e2e",
+  "test_command": "$TEST_COMMAND",
+  "e2e_folder": "$E2E_FOLDER",
+  "completion_promise": "$COMPLETION_PROMISE",
+  "custom_prompt": "$CUSTOM_PROMPT",
+  "max_iterations": $MAX_ITERATIONS,
+  "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "iterations": [],
+  "log": [
+    {"ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "event": "loop_started", "e2e_folder": "$E2E_FOLDER"}
+  ]
+}
+EOF
+
+# Create minimal state file for hook routing (points to state.json)
 STATE_FILE=".claude/e2e-loop-${SESSION_ID}.local.md"
 cat > "$STATE_FILE" <<EOF
 ---
 loop_type: "e2e"
 active: true
+state_json: "$STATE_JSON"
 iteration: 1
 max_iterations: $MAX_ITERATIONS
 test_command: "$TEST_COMMAND"
 completion_promise: $COMPLETION_PROMISE_YAML
-progress_path: "$PROGRESS_FILE"
 e2e_folder: "$E2E_FOLDER"
 custom_prompt: "$CUSTOM_PROMPT"
 working_branch: "$WORKING_BRANCH"
@@ -399,10 +409,10 @@ After committing, output this marker so the hook can verify and advance:
 
 The hook will:
 - Verify your commit exists
-- Log progress
+- Log to embedded state.json (don't touch it)
 - Advance to next iteration
 
-**If you don't output this marker, the iteration won't advance.**
+**Marker is optional** - hook auto-detects from git if e2e/test commit exists.
 
 ## Test Best Practices
 
@@ -478,5 +488,4 @@ echo "If you believe you're stuck or E2E coverage is unreachable, keep trying."
 echo "The loop continues until the promise is GENUINELY TRUE."
 echo "========================================================================"
 
-# Log STARTED to progress file
-echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"STARTED\",\"e2e_folder\":\"$E2E_FOLDER\",\"notes\":\"E2E test loop started\"}" >> "$PROGRESS_FILE"
+# NOTE: Log entry already added when creating state.json above

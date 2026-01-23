@@ -11,7 +11,7 @@
 # ARCHITECTURE:
 #   - External loop (this script) controls iteration count
 #   - Each iteration: claude -p "prompt" runs and exits
-#   - State persists in prd.json + progress.txt (file-based truth)
+#   - State persists in prd.json (single source of truth with embedded log)
 #   - Fresh context per iteration (no context rot)
 #   - Optional streaming output for visibility while AFK
 #
@@ -397,10 +397,9 @@ get_story_title() {
 }
 
 build_prd_prompt() {
-  local prd_dir spec_path progress_path feature_name
+  local prd_dir spec_path feature_name
   prd_dir=$(dirname "$PRD_PATH")
   spec_path="$prd_dir/spec.md"
-  progress_path="$prd_dir/progress.txt"
   feature_name=$(basename "$prd_dir")
 
   local next_story next_title incomplete_count total_count
@@ -435,7 +434,7 @@ Follow each skill's guidance for implementation patterns and quality standards.
   fi
 
   cat << PROMPT
-@$PRD_PATH @$spec_path ${progress_path:+@$progress_path}
+@$PRD_PATH @$spec_path
 
 # AFK Go Loop - Story Implementation
 
@@ -493,15 +492,16 @@ run_prd_loop() {
 
   local feature_name
   feature_name=$(basename "$(dirname "$PRD_PATH")")
-  local prd_dir progress_path
-  prd_dir=$(dirname "$PRD_PATH")
-  progress_path="$prd_dir/progress.txt"
 
   print_banner "PRD" "$PRD_PATH"
 
-  # Log loop start
-  if [[ -f "$progress_path" ]]; then
-    echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"AFK_LOOP_STARTED\",\"max_iterations\":$MAX_ITERATIONS,\"notes\":\"AFK go loop started\"}" >> "$progress_path"
+  # Log loop start to prd.json's embedded log
+  local log_entry="{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"afk_loop_started\",\"max_iterations\":$MAX_ITERATIONS}"
+  local temp_file="/tmp/prd_afk_start_$$.tmp"
+  if jq -e '.log' "$PRD_PATH" >/dev/null 2>&1; then
+    jq --argjson entry "$log_entry" '.log += [$entry]' "$PRD_PATH" > "$temp_file" && mv "$temp_file" "$PRD_PATH"
+  else
+    jq --argjson entry "$log_entry" '. + {log: [$entry]}' "$PRD_PATH" > "$temp_file" && mv "$temp_file" "$PRD_PATH"
   fi
 
   for ((ITERATION=1; ITERATION<=MAX_ITERATIONS; ITERATION++)); do
@@ -513,9 +513,10 @@ run_prd_loop() {
       log_success "All stories complete!"
       send_notification "AFK Loop Complete" "All $feature_name stories finished!"
 
-      if [[ -f "$progress_path" ]]; then
-        echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"AFK_LOOP_COMPLETE\",\"iterations\":$((ITERATION-1)),\"notes\":\"All stories complete\"}" >> "$progress_path"
-      fi
+      # Log completion to prd.json's embedded log
+      local log_entry="{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"afk_loop_complete\",\"iterations\":$((ITERATION-1))}"
+      local temp_file="/tmp/prd_afk_complete_$$.tmp"
+      jq --argjson entry "$log_entry" '.log += [$entry]' "$PRD_PATH" > "$temp_file" && mv "$temp_file" "$PRD_PATH"
 
       print_summary
       exit 0
@@ -529,10 +530,10 @@ run_prd_loop() {
 
     print_iteration_header "$ITERATION" "$MAX_ITERATIONS" "$status_str"
 
-    # Log iteration start
-    if [[ -f "$progress_path" ]]; then
-      echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$next_story,\"status\":\"AFK_ITERATION\",\"iteration\":$ITERATION,\"notes\":\"Starting iteration $ITERATION\"}" >> "$progress_path"
-    fi
+    # Log iteration start to prd.json's embedded log
+    local log_entry="{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"afk_iteration\",\"iteration\":$ITERATION,\"story_id\":$next_story}"
+    local temp_file="/tmp/prd_afk_iter_$$.tmp"
+    jq --argjson entry "$log_entry" '.log += [$entry]' "$PRD_PATH" > "$temp_file" && mv "$temp_file" "$PRD_PATH"
 
     # Build and run prompt
     local prompt result
@@ -553,9 +554,10 @@ run_prd_loop() {
       log_success "Detected completion promise - all stories complete!"
       send_notification "AFK Loop Complete" "All $feature_name stories finished!"
 
-      if [[ -f "$progress_path" ]]; then
-        echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"AFK_LOOP_COMPLETE\",\"iterations\":$ITERATION,\"notes\":\"Completion promise detected\"}" >> "$progress_path"
-      fi
+      # Log completion to prd.json's embedded log
+      local log_entry="{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"afk_loop_complete\",\"iterations\":$ITERATION,\"notes\":\"Completion promise detected\"}"
+      local temp_file="/tmp/prd_afk_promise_$$.tmp"
+      jq --argjson entry "$log_entry" '.log += [$entry]' "$PRD_PATH" > "$temp_file" && mv "$temp_file" "$PRD_PATH"
 
       print_summary
       exit 0
@@ -569,9 +571,10 @@ run_prd_loop() {
   log_warning "Max iterations ($MAX_ITERATIONS) reached"
   send_notification "AFK Loop Stopped" "Max iterations reached for $feature_name"
 
-  if [[ -f "$progress_path" ]]; then
-    echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"AFK_MAX_ITERATIONS\",\"iterations\":$MAX_ITERATIONS,\"notes\":\"Max iterations reached\"}" >> "$progress_path"
-  fi
+  # Log max iterations to prd.json's embedded log
+  local log_entry="{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"afk_max_iterations\",\"iterations\":$MAX_ITERATIONS}"
+  local temp_file="/tmp/prd_afk_max_$$.tmp"
+  jq --argjson entry "$log_entry" '.log += [$entry]' "$PRD_PATH" > "$temp_file" && mv "$temp_file" "$PRD_PATH"
 
   print_summary
   exit 1

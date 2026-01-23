@@ -95,7 +95,7 @@ GENERIC MODE:
 
 PRD MODE:
   Loops through stories until all have passes=true
-  Auto-commits per story, auto-updates progress.txt
+  Auto-commits per story, logs to prd.json's embedded log
     /go plans/auth/prd.json
 
 STOPPING:
@@ -269,14 +269,6 @@ if [[ "$MODE" == "generic" ]]; then
   # Quote completion promise for YAML
   COMPLETION_PROMISE_YAML="\"$COMPLETION_PROMISE\""
 
-  # Create progress file for generic mode
-  PROGRESS_FILE=".claude/go-progress.txt"
-  if [[ ! -f "$PROGRESS_FILE" ]]; then
-    echo "# Go Loop Progress Log" > "$PROGRESS_FILE"
-    echo "# Format: JSONL - one entry per event" >> "$PROGRESS_FILE"
-    echo "" >> "$PROGRESS_FILE"
-  fi
-
   # Create generic mode state file
   cat > "$STATE_FILE" <<EOF
 ---
@@ -287,7 +279,6 @@ once: $ONCE_MODE
 iteration: 1
 max_iterations: $MAX_ITERATIONS
 completion_promise: $COMPLETION_PROMISE_YAML
-progress_path: "$PROGRESS_FILE"
 working_branch: "$WORKING_BRANCH"
 branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -357,9 +348,6 @@ EOF
   echo "The loop continues until the promise is GENUINELY TRUE."
   echo "========================================================================"
 
-  # Log STARTED to progress file
-  echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"STARTED\",\"mode\":\"generic\",\"notes\":\"Go loop started (generic mode)\"}" >> "$PROGRESS_FILE"
-
 else
   # PRD mode validation
   if [[ ! -f "$PRD_PATH" ]]; then
@@ -412,45 +400,49 @@ else
     FEATURE_NAME=$(basename "$(dirname "$PRD_PATH")")
   fi
 
-  # Derive spec and progress paths
+  # Derive spec path (progress log is now embedded in prd.json)
   PRD_DIR=$(dirname "$PRD_PATH")
   SPEC_PATH="$PRD_DIR/spec.md"
-  PROGRESS_PATH="$PRD_DIR/progress.txt"
 
-  # Create progress file if it doesn't exist
-  if [[ ! -f "$PROGRESS_PATH" ]]; then
-    cat > "$PROGRESS_PATH" <<EOF
-# Progress Log: $FEATURE_NAME
-# Each line: JSON object with ts, story_id, status, notes
-# Status values: STARTED, PASSED, FAILED, BLOCKED
-EOF
+  # Initialize prd.json log array if missing (backward compat)
+  if ! jq -e '.log' "$PRD_PATH" >/dev/null 2>&1; then
+    local temp_file="/tmp/prd_init_log_$$.tmp"
+    jq '. + {log: []}' "$PRD_PATH" > "$temp_file" && mv "$temp_file" "$PRD_PATH"
   fi
 
   # Get current story details
   CURRENT_STORY=$(jq ".stories[] | select(.id == $FIRST_INCOMPLETE)" "$PRD_PATH")
   CURRENT_TITLE=$(echo "$CURRENT_STORY" | jq -r '.title')
-  CURRENT_SKILL=$(echo "$CURRENT_STORY" | jq -r '.skill // empty')
+  CURRENT_SKILLS_JSON=$(echo "$CURRENT_STORY" | jq -r '.skills // empty')
   TOTAL_STORIES=$STORY_COUNT
   INCOMPLETE_COUNT=$(jq '[.stories[] | select(.passes == false)] | length' "$PRD_PATH")
 
-  # Build skill field for frontmatter (only if skill exists)
+  # Build skills field for frontmatter (only if skills array exists and non-empty)
   SKILL_FRONTMATTER=""
   SKILL_SECTION=""
-  if [[ -n "$CURRENT_SKILL" ]]; then
-    SKILL_FRONTMATTER="skill: \"$CURRENT_SKILL\""
-    SKILL_SECTION="## Required Skill
+  if [[ -n "$CURRENT_SKILLS_JSON" ]] && [[ "$CURRENT_SKILLS_JSON" != "null" ]]; then
+    SKILLS_LIST=$(echo "$CURRENT_SKILLS_JSON" | jq -r '.[]' 2>/dev/null || echo "")
+    if [[ -n "$SKILLS_LIST" ]]; then
+      SKILL_FRONTMATTER="skills: $CURRENT_SKILLS_JSON"
+      SKILL_SECTION="## Required Skills
 
-This story requires the \`$CURRENT_SKILL\` skill. **BEFORE implementing**, invoke:
+This story requires the following skills. **BEFORE implementing**, load each:
 
-\`\`\`
-/Skill $CURRENT_SKILL
-\`\`\`
-
-Follow the skill's guidance for implementation approach, patterns, and quality standards.
 "
+      while IFS= read -r skill; do
+        [[ -n "$skill" ]] && SKILL_SECTION="${SKILL_SECTION}\`\`\`
+/Skill $skill
+\`\`\`
+
+"
+      done <<< "$SKILLS_LIST"
+      SKILL_SECTION="${SKILL_SECTION}Follow each skill's guidance for implementation patterns and quality standards.
+"
+    fi
   fi
 
-  # Create PRD mode state file
+  # Create PRD mode state file (minimal - state derived from prd.json)
+  # NOTE: current_story_id and total_stories removed - hook derives from prd.json
   cat > "$STATE_FILE" <<EOF
 ---
 loop_type: "go"
@@ -459,10 +451,7 @@ active: true
 once: $ONCE_MODE
 prd_path: "$PRD_PATH"
 spec_path: "$SPEC_PATH"
-progress_path: "$PROGRESS_PATH"
 feature_name: "$FEATURE_NAME"
-current_story_id: $FIRST_INCOMPLETE
-total_stories: $TOTAL_STORIES
 ${SKILL_FRONTMATTER:+$SKILL_FRONTMATTER
 }iteration: 1
 max_iterations: $MAX_ITERATIONS
@@ -514,23 +503,26 @@ $SKILL_SECTION## Your Task
 When you're done with this story, the hook will automatically:
 - Verify the story passes in prd.json (YOU must update this)
 - Verify you committed with story reference
-- Log to progress.txt (hook does this - don't touch it)
+- Log to prd.json's embedded log (hook does this - don't touch it)
 - Advance to the next story (or complete if all done)
 
 **Your responsibilities:**
 1. Update \`$PRD_PATH\`: set \`passes: true\` for story $FIRST_INCOMPLETE
 2. Commit with message containing \`story #$FIRST_INCOMPLETE\`
-3. Output structured markers
+3. Output \`<reviews_complete/>\` then \`<story_complete story_id="$FIRST_INCOMPLETE"/>\` (optional with fallback)
 
 CRITICAL: Only mark the story as passing when it genuinely passes all verification steps.
 EOF
 
-  # Log start to progress file (include skill if present)
+  # Log start to prd.json's embedded log (include skill if present)
+  local log_entry
   if [[ -n "$CURRENT_SKILL" ]]; then
-    echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$FIRST_INCOMPLETE,\"status\":\"STARTED\",\"skill\":\"$CURRENT_SKILL\",\"notes\":\"Beginning story #$FIRST_INCOMPLETE (requires $CURRENT_SKILL skill)\"}" >> "$PROGRESS_PATH"
+    log_entry="{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"loop_started\",\"story_id\":$FIRST_INCOMPLETE,\"skill\":\"$CURRENT_SKILL\"}"
   else
-    echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$FIRST_INCOMPLETE,\"status\":\"STARTED\",\"notes\":\"Beginning story #$FIRST_INCOMPLETE\"}" >> "$PROGRESS_PATH"
+    log_entry="{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"loop_started\",\"story_id\":$FIRST_INCOMPLETE}"
   fi
+  local temp_file="/tmp/prd_log_start_$$.tmp"
+  jq --argjson entry "$log_entry" '.log += [$entry]' "$PRD_PATH" > "$temp_file" && mv "$temp_file" "$PRD_PATH"
 
   # Build skill line for output
   SKILL_LINE=""
