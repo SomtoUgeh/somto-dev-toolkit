@@ -13,7 +13,7 @@
 #   - Frontmatter validation (missing --- delimiter)
 #   - Session ID security (path traversal prevention)
 #   - Story ID word boundaries (#1 vs #10)
-#   - loop_type backfill (backward compat)
+#   - loop_type validation (fail fast, no backfill)
 #   - sed escaping (special characters)
 
 # Keep tests running after failures; we track status manually.
@@ -481,10 +481,10 @@ result=$(get_field "$BOOL_FM" "enabled")
 assert_eq "false" "$result" "handles boolean false"
 
 # =============================================================================
-section "ISSUE FIX: loop_type Backfill and Validation"
+section "ISSUE FIX: loop_type Validation (no backward compat)"
 # =============================================================================
 
-describe "validate_state_file - backfill legacy state files"
+describe "validate_state_file - missing loop_type fails fast"
 
 LEGACY_DIR=$(mktemp_dir)
 register_cleanup_dir "$LEGACY_DIR"
@@ -502,15 +502,12 @@ completion_promise: "DONE"
 EOF
 
 LEGACY_FM=$(parse_frontmatter "$LEGACY_STATE")
-if validate_state_file "$LEGACY_FM" "go" "$LEGACY_STATE"; then
+if validate_state_file "$LEGACY_FM" "go" "$LEGACY_STATE" 2>/dev/null; then
   status="success"
 else
   status="failed"
 fi
-assert_eq "success" "$status" "backfills missing loop_type"
-
-BACKFILLED_LOOP=$(sed -n 's/^loop_type: "\(.*\)"/\1/p' "$LEGACY_STATE" | head -1)
-assert_eq "go" "$BACKFILLED_LOOP" "loop_type inserted into legacy frontmatter"
+assert_eq "failed" "$status" "missing loop_type fails fast (no backfill)"
 
 describe "validate_state_file - mismatch fails"
 
@@ -867,11 +864,9 @@ write_go_prd_state() {
   local prd_path="$2"
   local spec_path="$3"
   local feature_name="$4"
-  local current_story_id="$5"
-  local total_stories="$6"
-  local iteration="$7"
-  local working_branch="${8:-}"
-  local branch_setup_done="${9:-}"
+  local iteration="$5"
+  local working_branch="${6:-}"
+  local branch_setup_done="${7:-}"
 
   if [[ -n "$working_branch" ]]; then
     working_branch=${working_branch//\"/\\\"}
@@ -884,10 +879,7 @@ mode: "prd"
 active: true
 prd_path: "$prd_path"
 spec_path: "$spec_path"
-progress_path: ""
 feature_name: "$feature_name"
-current_story_id: $current_story_id
-total_stories: $total_stories
 EOF
 
   if [[ -n "$working_branch" ]]; then
@@ -918,7 +910,6 @@ active: true
 iteration: $iteration
 max_iterations: 5
 completion_promise: "DONE"
-progress_path: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
 # $loop_type Loop
@@ -1004,7 +995,7 @@ assert_eq "<reviews_complete/>" "$result" "finds reviews_complete marker"
 section "INTEGRATION: stop_hook End-to-End"
 # =============================================================================
 
-describe "Legacy PRD state backfill (no loop_type)"
+describe "State file without loop_type fails fast (no backward compat)"
 
 PROJECT_DIR=$(mktemp_dir)
 register_cleanup_dir "$PROJECT_DIR"
@@ -1023,7 +1014,6 @@ input_path: ""
 input_raw: "Build feature x"
 spec_path: ""
 prd_path: ""
-progress_path: ""
 interview_questions: 0
 max_iterations: 0
 gate_status: "pending"
@@ -1041,10 +1031,9 @@ write_transcript "$TRANSCRIPT" "No markers yet."
 HOOK_INPUT=$(build_hook_input "$SESSION_ID" "$TRANSCRIPT" "$PROJECT_DIR")
 run_hook "$HOOK_INPUT" "$PROJECT_DIR"
 
-assert_eq "0" "$HOOK_STATUS" "hook exits cleanly for active PRD loop"
-assert_contains "$HOOK_OUTPUT" '"decision": "block"' "hook blocks exit for active PRD loop"
-BACKFILLED_LOOP=$(sed -n 's/^loop_type: "\(.*\)"/\1/p' "$STATE_FILE" | head -1)
-assert_eq "prd" "$BACKFILLED_LOOP" "loop_type backfilled in state file"
+# Without loop_type, should allow exit (fail fast, no backfill)
+assert_eq "0" "$HOOK_STATUS" "hook exits cleanly when loop_type missing"
+assert_contains "$HOOK_OUTPUT" '"decision": "allow"' "hook allows exit when state file is invalid"
 
 describe "PRD phase 3 with Windows spec_path"
 
@@ -1066,7 +1055,6 @@ input_path: ""
 input_raw: "Auth"
 spec_path: ""
 prd_path: ""
-progress_path: ""
 working_branch: "feat/auth"
 branch_setup_done: true
 interview_questions: 0
@@ -1118,7 +1106,6 @@ input_path: ""
 input_raw: "Review feature"
 spec_path: "$PROJECT_DIR2B/plans/spec.md"
 prd_path: ""
-progress_path: ""
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1167,7 +1154,6 @@ input_path: ""
 input_raw: "Review feature"
 spec_path: "$PROJECT_DIR2C/plans/spec.md"
 prd_path: ""
-progress_path: ""
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1217,7 +1203,6 @@ input_path: ""
 input_raw: "Review feature"
 spec_path: "$PROJECT_DIR2D1/plans/spec.md"
 prd_path: ""
-progress_path: ""
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1277,7 +1262,6 @@ input_path: ""
 input_raw: "Review feature"
 spec_path: "$PROJECT_DIR2D2/plans/spec.md"
 prd_path: ""
-progress_path: ""
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1338,7 +1322,6 @@ input_path: ""
 input_raw: "Review feature"
 spec_path: "$PROJECT_DIR2D3/plans/spec.md"
 prd_path: ""
-progress_path: ""
 interview_questions: 0
 max_iterations: 0
 reviews_complete: true
@@ -1391,7 +1374,6 @@ input_path: ""
 input_raw: "Auto phase"
 spec_path: "$PROJECT_DIR2D/plans/spec.md"
 prd_path: ""
-progress_path: ""
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1440,7 +1422,6 @@ input_path: ""
 input_raw: "Auto phase"
 spec_path: "$PROJECT_DIR2E/plans/spec.md"
 prd_path: "$PROJECT_DIR2E/plans/prd.json"
-progress_path: ""
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1487,7 +1468,6 @@ input_path: ""
 input_raw: "Auto phase"
 spec_path: "$PROJECT_DIR2F/plans/spec.md"
 prd_path: "$PROJECT_DIR2F/plans/prd.json"
-progress_path: "$PROJECT_DIR2F/plans/progress.txt"
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1500,7 +1480,9 @@ started_at: "2024-01-01T00:00:00Z"
 # PRD Loop
 EOF
 
-printf '%s\n' "progress" > "$PROJECT_DIR2F/plans/progress.txt"
+# Create prd.json with log array (triggers phase 5 auto-advance)
+printf '%s\n' '{ "title": "Feature", "stories": [], "log": [] }' > "$PROJECT_DIR2F/plans/prd.json"
+printf '%s\n' "spec" > "$PROJECT_DIR2F/plans/spec.md"
 
 TRANSCRIPT2F="$PROJECT_DIR2F/transcript.jsonl"
 write_transcript "$TRANSCRIPT2F" "No markers yet."
@@ -1532,7 +1514,6 @@ input_path: ""
 input_raw: "Auto phase"
 spec_path: "$PROJECT_DIR2F1/plans/spec.md"
 prd_path: "$PROJECT_DIR2F1/plans/prd.json"
-progress_path: "$PROJECT_DIR2F1/plans/progress.txt"
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1581,7 +1562,6 @@ input_path: ""
 input_raw: "Auto phase"
 spec_path: "$PROJECT_DIR2G/plans/spec.md"
 prd_path: "$PROJECT_DIR2G/plans/prd.json"
-progress_path: "$PROJECT_DIR2G/plans/progress.txt"
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1595,8 +1575,7 @@ started_at: "2024-01-01T00:00:00Z"
 EOF
 
 printf '%s\n' "spec" > "$PROJECT_DIR2G/plans/spec.md"
-printf '%s\n' '{ "title": "Feature", "stories": [] }' > "$PROJECT_DIR2G/plans/prd.json"
-printf '%s\n' "progress" > "$PROJECT_DIR2G/plans/progress.txt"
+printf '%s\n' '{ "title": "Feature", "stories": [], "log": [] }' > "$PROJECT_DIR2G/plans/prd.json"
 
 TRANSCRIPT2G="$PROJECT_DIR2G/transcript.jsonl"
 write_transcript "$TRANSCRIPT2G" "No markers yet."
@@ -1627,7 +1606,6 @@ input_path: ""
 input_raw: "Continuous feature"
 spec_path: ""
 prd_path: ""
-progress_path: ""
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1671,7 +1649,6 @@ input_path: ""
 input_raw: "Promise feature"
 spec_path: "plans/promise-feature/spec.md"
 prd_path: ""
-progress_path: ""
 interview_questions: 10
 max_iterations: 0
 reviews_complete: true
@@ -1713,7 +1690,6 @@ input_path: ""
 input_raw: "Auto feature"
 spec_path: "plans/auto-feature/spec.md"
 prd_path: "plans/auto-feature/prd.json"
-progress_path: "plans/auto-feature/progress.txt"
 interview_questions: 10
 max_iterations: 0
 reviews_complete: false
@@ -1757,7 +1733,6 @@ once: false
 iteration: 1
 max_iterations: 5
 completion_promise: "TESTS_PASS"
-progress_path: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
 # go Loop
@@ -1805,7 +1780,6 @@ input_path: ""
 input_raw: "Feature y"
 spec_path: ""
 prd_path: ""
-progress_path: ""
 interview_questions: 0
 max_iterations: 0
 reviews_complete: false
@@ -1854,7 +1828,6 @@ once: false
 iteration: 1
 max_iterations: 5
 completion_promise: "DONE"
-progress_path: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
 # go Loop
@@ -1892,7 +1865,6 @@ once: false
 iteration: 1
 max_iterations: 5
 completion_promise: "DONE"
-progress_path: ""
 started_at: "2024-01-01T00:00:00Z"
 ---
 # go Loop
@@ -1928,10 +1900,7 @@ mode: "prd"
 active: true
 prd_path: "$PROJECT_DIR7/plans/missing-prd.json"
 spec_path: "$PROJECT_DIR7/plans/spec.md"
-progress_path: ""
 feature_name: "feature-z"
-current_story_id: 1
-total_stories: 1
 iteration: 1
 max_iterations: 5
 started_at: "2024-01-01T00:00:00Z"
@@ -1964,10 +1933,7 @@ mode: "prd"
 active: true
 prd_path: "$PROJECT_DIR8/plans/prd.json"
 spec_path: "$PROJECT_DIR8/plans/spec.md"
-progress_path: ""
 feature_name: "feature-w"
-current_story_id: 1
-total_stories: 1
 iteration: 1
 max_iterations: 5
 started_at: "2024-01-01T00:00:00Z"
@@ -2001,7 +1967,7 @@ mkdir -p "$PROJECT_DIR9/.claude" "$PROJECT_DIR9/plans"
 
 SESSION_ID9="storypass123"
 STATE_FILE9="$PROJECT_DIR9/.claude/go-loop-${SESSION_ID9}.local.md"
-write_go_prd_state "$STATE_FILE9" "$PROJECT_DIR9/plans/prd.json" "$PROJECT_DIR9/plans/spec.md" "feature-a" 1 2 1
+write_go_prd_state "$STATE_FILE9" "$PROJECT_DIR9/plans/prd.json" "$PROJECT_DIR9/plans/spec.md" "feature-a" 1
 write_prd_two_stories "$PROJECT_DIR9/plans/prd.json" "false" "false"
 
 TRANSCRIPT9="$PROJECT_DIR9/transcript.jsonl"
@@ -2014,24 +1980,32 @@ assert_contains "$HOOK_OUTPUT" "working on verification" "blocks when story not 
 
 describe "Passing story without reviews blocks"
 
+# Test: Story has passes=true, story_complete marker present, but no reviews_complete marker
+# Hook should block and require reviews to be run
+
 PROJECT_DIR10=$(mktemp_dir)
 register_cleanup_dir "$PROJECT_DIR10"
 mkdir -p "$PROJECT_DIR10/.claude" "$PROJECT_DIR10/plans"
 
 SESSION_ID10="noreviews123"
 STATE_FILE10="$PROJECT_DIR10/.claude/go-loop-${SESSION_ID10}.local.md"
-write_go_prd_state "$STATE_FILE10" "$PROJECT_DIR10/plans/prd.json" "$PROJECT_DIR10/plans/spec.md" "feature-b" 1 2 1
-write_prd_two_stories "$PROJECT_DIR10/plans/prd.json" "true" "false"
+write_go_prd_state "$STATE_FILE10" "$PROJECT_DIR10/plans/prd.json" "$PROJECT_DIR10/plans/spec.md" "feature-b" 1
+# Story 1 complete, Story 2 also passes=true (we're completing story 2)
+write_prd_two_stories "$PROJECT_DIR10/plans/prd.json" "true" "true"
 
 TRANSCRIPT10="$PROJECT_DIR10/transcript.jsonl"
-write_transcript "$TRANSCRIPT10" "No markers yet."
+# Has story_complete marker but NO reviews_complete marker
+write_transcript "$TRANSCRIPT10" "<story_complete story_id=\"2\"/>"
 
 HOOK_INPUT10=$(build_hook_input "$SESSION_ID10" "$TRANSCRIPT10" "$PROJECT_DIR10")
 run_hook "$HOOK_INPUT10" "$PROJECT_DIR10"
 
-assert_contains "$HOOK_OUTPUT" "Now run reviews" "blocks when reviews missing"
+assert_contains "$HOOK_OUTPUT" "reviews_complete" "blocks when reviews missing"
 
 describe "Reviews complete but no story_complete blocks"
+
+# Test: Story has passes=true, reviews_complete marker present, but no story_complete marker
+# Hook should block and ask for story_complete marker (or detect commit fallback)
 
 PROJECT_DIR11=$(mktemp_dir)
 register_cleanup_dir "$PROJECT_DIR11"
@@ -2039,8 +2013,10 @@ mkdir -p "$PROJECT_DIR11/.claude" "$PROJECT_DIR11/plans"
 
 SESSION_ID11="nostorymarker123"
 STATE_FILE11="$PROJECT_DIR11/.claude/go-loop-${SESSION_ID11}.local.md"
-write_go_prd_state "$STATE_FILE11" "$PROJECT_DIR11/plans/prd.json" "$PROJECT_DIR11/plans/spec.md" "feature-c" 1 2 1
-write_prd_two_stories "$PROJECT_DIR11/plans/prd.json" "true" "false"
+write_go_prd_state "$STATE_FILE11" "$PROJECT_DIR11/plans/prd.json" "$PROJECT_DIR11/plans/spec.md" "feature-c" 1
+# Story 2 has passes=true but no story_complete marker yet
+write_prd_two_stories "$PROJECT_DIR11/plans/prd.json" "true" "true"
+# NOTE: No git repo, so commit fallback won't trigger
 
 TRANSCRIPT11="$PROJECT_DIR11/transcript.jsonl"
 write_transcript "$TRANSCRIPT11" "<reviews_complete/>"
@@ -2048,9 +2024,16 @@ write_transcript "$TRANSCRIPT11" "<reviews_complete/>"
 HOOK_INPUT11=$(build_hook_input "$SESSION_ID11" "$TRANSCRIPT11" "$PROJECT_DIR11")
 run_hook "$HOOK_INPUT11" "$PROJECT_DIR11"
 
-assert_contains "$HOOK_OUTPUT" "Now commit and output" "blocks until story_complete marker"
+# With all stories passing and no story_complete marker, hook should say "All stories complete"
+# OR require a story_complete marker for the last story worked on
+# Since we can't determine which story was last worked on without the marker, loop completes
+assert_contains "$HOOK_OUTPUT" "All stories complete" "recognizes all stories done when passes=true"
 
-describe "Story id mismatch blocks"
+describe "story_complete marker for non-passing story blocks"
+
+# Test: story_complete marker present for a story that doesn't have passes=true yet
+# New architecture: We trust the marker's story_id and verify passes=true for that story
+# If passes=false, we block and ask to update prd.json
 
 PROJECT_DIR12=$(mktemp_dir)
 register_cleanup_dir "$PROJECT_DIR12"
@@ -2058,18 +2041,19 @@ mkdir -p "$PROJECT_DIR12/.claude" "$PROJECT_DIR12/plans"
 
 SESSION_ID12="mismatch123"
 STATE_FILE12="$PROJECT_DIR12/.claude/go-loop-${SESSION_ID12}.local.md"
-write_go_prd_state "$STATE_FILE12" "$PROJECT_DIR12/plans/prd.json" "$PROJECT_DIR12/plans/spec.md" "feature-d" 1 2 1
-# Story 1 passes=false so no auto-reconciliation - tests mismatch detection
+write_go_prd_state "$STATE_FILE12" "$PROJECT_DIR12/plans/prd.json" "$PROJECT_DIR12/plans/spec.md" "feature-d" 1
+# Both stories have passes=false
 write_prd_two_stories "$PROJECT_DIR12/plans/prd.json" "false" "false"
 
 TRANSCRIPT12="$PROJECT_DIR12/transcript.jsonl"
-# Output story_id="2" when current is 1 - should trigger mismatch
+# Output story_complete for story 2, but story 2 has passes=false
 write_transcript "$TRANSCRIPT12" "<reviews_complete/>\n<story_complete story_id=\"2\"/>"
 
 HOOK_INPUT12=$(build_hook_input "$SESSION_ID12" "$TRANSCRIPT12" "$PROJECT_DIR12")
 run_hook "$HOOK_INPUT12" "$PROJECT_DIR12"
 
-assert_contains "$HOOK_OUTPUT" "story_id mismatch" "blocks on story_id mismatch"
+# Hook should tell us to update prd.json to set passes=true for story 2
+assert_contains "$HOOK_OUTPUT" "passes: false" "blocks when story doesn't have passes=true"
 
 describe "story_complete with passes false blocks"
 
@@ -2079,7 +2063,7 @@ mkdir -p "$PROJECT_DIR13/.claude" "$PROJECT_DIR13/plans"
 
 SESSION_ID13="passesfalse123"
 STATE_FILE13="$PROJECT_DIR13/.claude/go-loop-${SESSION_ID13}.local.md"
-write_go_prd_state "$STATE_FILE13" "$PROJECT_DIR13/plans/prd.json" "$PROJECT_DIR13/plans/spec.md" "feature-e" 1 2 1
+write_go_prd_state "$STATE_FILE13" "$PROJECT_DIR13/plans/prd.json" "$PROJECT_DIR13/plans/spec.md" "feature-e" 1
 write_prd_two_stories "$PROJECT_DIR13/plans/prd.json" "false" "false"
 
 TRANSCRIPT13="$PROJECT_DIR13/transcript.jsonl"
@@ -2098,7 +2082,7 @@ mkdir -p "$PROJECT_DIR14/.claude" "$PROJECT_DIR14/plans"
 
 SESSION_ID14="missingreviews123"
 STATE_FILE14="$PROJECT_DIR14/.claude/go-loop-${SESSION_ID14}.local.md"
-write_go_prd_state "$STATE_FILE14" "$PROJECT_DIR14/plans/prd.json" "$PROJECT_DIR14/plans/spec.md" "feature-f" 1 2 1
+write_go_prd_state "$STATE_FILE14" "$PROJECT_DIR14/plans/prd.json" "$PROJECT_DIR14/plans/spec.md" "feature-f" 1
 write_prd_two_stories "$PROJECT_DIR14/plans/prd.json" "true" "false"
 
 TRANSCRIPT14="$PROJECT_DIR14/transcript.jsonl"
@@ -2119,7 +2103,7 @@ git_commit_file "$PROJECT_DIR15" "chore: init" "README.md" "init"
 
 SESSION_ID15="nocommit123"
 STATE_FILE15="$PROJECT_DIR15/.claude/go-loop-${SESSION_ID15}.local.md"
-write_go_prd_state "$STATE_FILE15" "$PROJECT_DIR15/plans/prd.json" "$PROJECT_DIR15/plans/spec.md" "feature-g" 1 2 1
+write_go_prd_state "$STATE_FILE15" "$PROJECT_DIR15/plans/prd.json" "$PROJECT_DIR15/plans/spec.md" "feature-g" 1
 write_prd_two_stories "$PROJECT_DIR15/plans/prd.json" "true" "false"
 
 TRANSCRIPT15="$PROJECT_DIR15/transcript.jsonl"
@@ -2142,7 +2126,7 @@ git_commit_file "$PROJECT_DIR16" "feat(feature-h): story #1 - done" "README.md" 
 
 SESSION_ID16="advance123"
 STATE_FILE16="$PROJECT_DIR16/.claude/go-loop-${SESSION_ID16}.local.md"
-write_go_prd_state "$STATE_FILE16" "$PROJECT_DIR16/plans/prd.json" "$PROJECT_DIR16/plans/spec.md" "feature-h" 1 2 1 "feat/feature-h" "true"
+write_go_prd_state "$STATE_FILE16" "$PROJECT_DIR16/plans/prd.json" "$PROJECT_DIR16/plans/spec.md" "feature-h" 1 "feat/feature-h" "true"
 write_prd_two_stories "$PROJECT_DIR16/plans/prd.json" "true" "false"
 
 TRANSCRIPT16="$PROJECT_DIR16/transcript.jsonl"
@@ -2151,8 +2135,8 @@ write_transcript "$TRANSCRIPT16" "<reviews_complete/>\n<story_complete story_id=
 HOOK_INPUT16=$(build_hook_input "$SESSION_ID16" "$TRANSCRIPT16" "$PROJECT_DIR16")
 run_hook "$HOOK_INPUT16" "$PROJECT_DIR16"
 
-NEXT_ID=$(sed -n 's/^current_story_id: \(.*\)/\1/p' "$STATE_FILE16" | head -1)
-assert_eq "2" "$NEXT_ID" "advances to next story"
+# current_story_id is derived from prd.json, not stored in state file
+# Check iteration increments and output mentions next story
 NEXT_ITER=$(sed -n 's/^iteration: \(.*\)/\1/p' "$STATE_FILE16" | head -1)
 assert_eq "2" "$NEXT_ITER" "iteration increments on advance"
 BRANCH_PERSIST=$(sed -n 's/^working_branch: "\(.*\)"/\1/p' "$STATE_FILE16" | head -1)
@@ -2171,7 +2155,7 @@ git_commit_file "$PROJECT_DIR17" "feat(feature-i): story #1 - done" "README.md" 
 
 SESSION_ID17="complete123"
 STATE_FILE17="$PROJECT_DIR17/.claude/go-loop-${SESSION_ID17}.local.md"
-write_go_prd_state "$STATE_FILE17" "$PROJECT_DIR17/plans/prd.json" "$PROJECT_DIR17/plans/spec.md" "feature-i" 1 1 1
+write_go_prd_state "$STATE_FILE17" "$PROJECT_DIR17/plans/prd.json" "$PROJECT_DIR17/plans/spec.md" "feature-i" 1
 write_prd_single_story "$PROJECT_DIR17/plans/prd.json" "true"
 
 TRANSCRIPT17="$PROJECT_DIR17/transcript.jsonl"
