@@ -436,7 +436,7 @@ is_valid_prd_phase() {
 
 # Validate state file fields based on loop type
 # Returns 0 if valid, 1 if invalid (with error message to stderr)
-# Backfills missing loop_type for backward compatibility with pre-0.10.33 state files
+# Fails fast if loop_type missing (no backward compat - delete state file and restart)
 validate_state_file() {
   local frontmatter="$1"
   local expected_loop="$2"
@@ -446,13 +446,10 @@ validate_state_file() {
   local loop_type
   loop_type=$(get_field "$frontmatter" "loop_type")
 
-  # Backfill missing loop_type (backward compat with pre-0.10.33 state files)
+  # Fail fast on missing loop_type (no backward compat)
   if [[ -z "$loop_type" ]]; then
-    echo "Note: State file missing 'loop_type' - backfilling from detected loop '$expected_loop'" >&2
-    # Add loop_type to frontmatter (after first ---)
-    sed_inplace "2i\\
-loop_type: \"$expected_loop\"" "$state_file"
-    loop_type="$expected_loop"
+    echo "Error: State file missing 'loop_type' field. Delete state file and restart loop." >&2
+    return 1
   fi
 
   # Validate loop_type matches detected active loop
@@ -511,6 +508,8 @@ if ! validate_state_file "$FRONTMATTER" "$ACTIVE_LOOP" "$STATE_FILE"; then
   echo "" >&2
   echo "   Loop is stopping. Run /$ACTIVE_LOOP again to start fresh." >&2
   rm "$STATE_FILE"
+  # Allow exit - invalid state file means we can't continue
+  jq -n '{"decision": "allow"}'
   exit 0
 fi
 
@@ -518,7 +517,6 @@ ITERATION=$(get_field "$FRONTMATTER" "iteration")
 MAX_ITERATIONS=$(get_field "$FRONTMATTER" "max_iterations")
 COMPLETION_PROMISE=$(get_field "$FRONTMATTER" "completion_promise")
 ONCE_MODE=$(get_field "$FRONTMATTER" "once")
-PROGRESS_PATH=$(get_field "$FRONTMATTER" "progress_path")
 
 # Handle mode for go loop
 MODE=""
@@ -526,12 +524,22 @@ if [[ "$ACTIVE_LOOP" == "go" ]]; then
   MODE=$(get_field "$FRONTMATTER" "mode")
 fi
 
-# Helper to log progress (only if progress_path exists)
+# Helper to log progress - appends to embedded log in state JSON (prd.json or state.json)
+# For PRD mode: appends to prd.json's log array
+# For UT/E2E: appends to state.json's log array
 log_progress() {
   local json="$1"
-  if [[ -n "$PROGRESS_PATH" ]] && [[ -f "$PROGRESS_PATH" ]]; then
-    echo "$json" >> "$PROGRESS_PATH"
+  local state_json="${2:-}"
+
+  [[ -z "$state_json" ]] || [[ ! -f "$state_json" ]] && return 0
+
+  local temp_file="/tmp/log_progress_$$.tmp"
+  if jq -e '.log' "$state_json" >/dev/null 2>&1; then
+    jq --argjson entry "$json" '.log += [$entry]' "$state_json" > "$temp_file"
+  else
+    jq --argjson entry "$json" '. + {log: [$entry]}' "$state_json" > "$temp_file"
   fi
+  mv "$temp_file" "$state_json" 2>/dev/null || { cp "$temp_file" "$state_json" && rm -f "$temp_file"; }
 }
 
 # =============================================================================
@@ -541,13 +549,7 @@ if [[ "$ACTIVE_LOOP" != "prd" ]] && [[ "$ONCE_MODE" == "true" ]]; then
   echo "✅ Loop ($ACTIVE_LOOP): Single iteration complete (HITL mode)"
   echo "   Run /$ACTIVE_LOOP again to continue, or remove --once for full loop."
   notify "Loop ($ACTIVE_LOOP)" "Iteration complete - ready for review"
-  # Log HITL_PAUSE for all loop types
-  if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
-    CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
-    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"HITL_PAUSE\",\"notes\":\"Single iteration complete (--once mode)\"}"
-  else
-    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"HITL_PAUSE\",\"iteration\":$ITERATION,\"notes\":\"Single iteration complete (--once mode)\"}"
-  fi
+  log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"hitl_pause\",\"iteration\":$ITERATION,\"notes\":\"Single iteration complete (--once mode)\"}"
   rm "$STATE_FILE"
   exit 0
 fi
@@ -591,13 +593,7 @@ if [[ "$ACTIVE_LOOP" != "prd" ]]; then
       echo "🛑 Loop ($ACTIVE_LOOP): Max iterations ($MAX_ITERATIONS) reached."
       notify "Loop ($ACTIVE_LOOP)" "Max iterations ($MAX_ITERATIONS) reached"
     fi
-    # Log max iterations reached for all loop types
-    if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
-      CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
-      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"MAX_ITERATIONS\",\"notes\":\"Loop stopped after $ITERATION iterations\"}"
-    else
-      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"MAX_ITERATIONS\",\"iteration\":$ITERATION,\"notes\":\"Loop stopped after $ITERATION iterations\"}"
-    fi
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"max_iterations\",\"iteration\":$ITERATION,\"notes\":\"Loop stopped after $ITERATION iterations\"}"
     rm "$STATE_FILE"
     exit 0
   fi
@@ -1096,24 +1092,28 @@ After writing PRD, output:
 \`\`\`"
         ;;
       "5")
-        prompt="# PRD Loop: Phase 5 - Create Progress File
+        prompt="# PRD Loop: Phase 5 - Verify PRD Structure
 
 **Feature:** $FEATURE_NAME
 **PRD:** \`$PRD_PATH\`
 
 ## Your Task
 
-Write progress file to: \`plans/$FEATURE_NAME/progress.txt\`
+Verify prd.json has required structure for the /go loop:
 
-\`\`\`
-# Progress Log: $FEATURE_NAME
-# Each line: JSON object with ts, story_id, status, notes
-# Status values: STARTED, PASSED, FAILED, BLOCKED
+1. Check \`$PRD_PATH\` has a \`log\` array (initialize to \`[]\` if missing)
+2. Verify all stories have \`completed_at: null\` and \`commit: null\` fields
+3. Verify all stories have \`passes: false\`
+
+The /go loop will append log entries automatically:
+\`\`\`json
+{\"ts\":\"...\",\"event\":\"story_started\",\"story_id\":1}
+{\"ts\":\"...\",\"event\":\"story_complete\",\"story_id\":1,\"commit\":\"abc123\"}
 \`\`\`
 
-After creating progress file, output:
+After verifying structure, output:
 \`\`\`
-<phase_complete phase=\"5\" progress_path=\"plans/$FEATURE_NAME/progress.txt\"/>
+<phase_complete phase=\"5\"/>
 \`\`\`"
         ;;
       "5.5")
@@ -1165,8 +1165,7 @@ esac
 2. Use AskUserQuestion:
 \"PRD ready! Files created:
 - \`plans/$FEATURE_NAME/spec.md\`
-- \`plans/$FEATURE_NAME/prd.json\`
-- \`plans/$FEATURE_NAME/progress.txt\`
+- \`plans/$FEATURE_NAME/prd.json\` (with embedded progress log)
 
 Go command copied to clipboard. What next?\"
 
@@ -1346,12 +1345,6 @@ reviews_complete: true" "$STATE_FILE"
         ;;
       "5")
         NEXT_PHASE="5.5"
-        # Extract progress_path from marker
-        MARKER_PROGRESS=$(extract_regex_last "$LAST_OUTPUT" '<phase_complete[^>]*progress_path="([^"]+)"')
-        if [[ -n "$MARKER_PROGRESS" ]]; then
-          ESCAPED_PATH=$(escape_sed_replacement "$MARKER_PROGRESS")
-          sed_inplace "s|^progress_path: .*|progress_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
-        fi
         ;;
       "5.5") NEXT_PHASE="6" ;;
       "6")
@@ -1376,7 +1369,6 @@ reviews_complete: true" "$STATE_FILE"
   # Auto-discover paths from convention if not set
   EXPECTED_SPEC="plans/$FEATURE_NAME/spec.md"
   EXPECTED_PRD="plans/$FEATURE_NAME/prd.json"
-  EXPECTED_PROGRESS="plans/$FEATURE_NAME/progress.txt"
 
   if [[ -z "$NEXT_PHASE" ]] && [[ -z "$INVALID_NEXT_REASON" ]]; then
     case "$CURRENT_PHASE" in
@@ -1414,14 +1406,12 @@ reviews_complete: true" "$STATE_FILE"
         fi
         ;;
       "5")
-        # Check if progress file exists at convention path
-        PROGRESS_TO_CHECK="${PROGRESS_PATH:-$EXPECTED_PROGRESS}"
-        if [[ -f "$PROGRESS_TO_CHECK" ]]; then
-          echo "⚠️  Loop (prd): Phase 5 work detected (progress file exists). Auto-advancing to 5.5." >&2
+        # Check if prd.json has log array (structure verified)
+        PRD_TO_CHECK="${PRD_PATH:-$EXPECTED_PRD}"
+        if [[ -f "$PRD_TO_CHECK" ]] && jq -e '.log' "$PRD_TO_CHECK" >/dev/null 2>&1; then
+          echo "⚠️  Loop (prd): Phase 5 work detected (prd.json has log array). Auto-advancing to 5.5." >&2
           NEXT_PHASE="5.5"
-          ESCAPED_PATH=$(escape_sed_replacement "$PROGRESS_TO_CHECK")
-          sed_inplace "s|^progress_path: .*|progress_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
-          SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 5→5.5 (marker missing but progress file exists)"
+          SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 5→5.5 (marker missing but prd.json structure verified)"
         fi
         ;;
       "5.5")
@@ -1440,12 +1430,11 @@ reviews_complete: true" "$STATE_FILE"
         fi
         ;;
       "6")
-        # Phase 6 is just presentation - if all files exist, PRD is complete
+        # Phase 6 is just presentation - if spec and prd exist with log, PRD is complete
         prd_check="${PRD_PATH:-$EXPECTED_PRD}"
         spec_check="${SPEC_PATH:-$EXPECTED_SPEC}"
-        progress_check="${PROGRESS_PATH:-$EXPECTED_PROGRESS}"
-        if [[ -f "$prd_check" ]] && [[ -f "$spec_check" ]] && [[ -f "$progress_check" ]]; then
-          echo "✅ Loop (prd): Phase 6 - All PRD files exist. Completing loop." >&2
+        if [[ -f "$prd_check" ]] && [[ -f "$spec_check" ]] && jq -e '.log' "$prd_check" >/dev/null 2>&1; then
+          echo "✅ Loop (prd): Phase 6 - PRD files exist with valid structure. Completing loop." >&2
           notify "Loop (prd)" "PRD complete for $FEATURE_NAME!"
           rm "$STATE_FILE"
           exit 0
@@ -1534,10 +1523,11 @@ if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]] && [[
     notify "Loop ($ACTIVE_LOOP)" "Task complete! $COMPLETION_PROMISE"
     # Log COMPLETED for all loop types
     if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
-      CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
-      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"COMPLETED\",\"notes\":\"Promise fulfilled: $COMPLETION_PROMISE\"}"
+      local prd_for_log
+      prd_for_log=$(get_field "$FRONTMATTER" "prd_path")
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"loop_complete\",\"notes\":\"Promise fulfilled: $COMPLETION_PROMISE\"}" "$prd_for_log"
     else
-      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"COMPLETED\",\"iteration\":$ITERATION,\"notes\":\"Promise fulfilled: $COMPLETION_PROMISE\"}"
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"loop_complete\",\"iteration\":$ITERATION,\"notes\":\"Promise fulfilled: $COMPLETION_PROMISE\"}"
     fi
     [[ "$ACTIVE_LOOP" =~ ^(go|ut|e2e)$ ]] && show_loop_summary "$STATE_FILE" "$ITERATION"
     rm "$STATE_FILE"
@@ -1550,11 +1540,8 @@ fi
 # =============================================================================
 if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
   PRD_PATH=$(get_field "$FRONTMATTER" "prd_path")
-  PROGRESS_PATH=$(get_field "$FRONTMATTER" "progress_path")
   SPEC_PATH=$(get_field "$FRONTMATTER" "spec_path")
   FEATURE_NAME=$(get_field "$FRONTMATTER" "feature_name")
-  CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
-  TOTAL_STORIES=$(get_field "$FRONTMATTER" "total_stories")
 
   if [[ -z "$PRD_PATH" ]] || [[ ! -f "$PRD_PATH" ]]; then
     PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
@@ -1570,76 +1557,100 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
     exit 0
   fi
 
-  # ===========================================================================
-  # RECONCILIATION: Sync state from prd.json (authoritative source)
-  # ===========================================================================
-  # This prevents drift between local.md state and prd.json story status.
-  # If prd.json shows current story passes but local.md hasn't advanced,
-  # we auto-advance to prevent getting stuck.
+  # ==========================================================================
+  # SINGLE SOURCE OF TRUTH: Derive state from prd.json
+  # ==========================================================================
+  TOTAL_STORIES=$(jq '.stories | length' "$PRD_PATH")
+  COMPLETED_COUNT=$(jq '[.stories[] | select(.passes == true)] | length' "$PRD_PATH")
 
-  reconcile_prd_state() {
-    local state_file="$1"
-    local prd_path="$2"
-    local current_story="$3"
-    local reconciled=false
-
-    # Check if current story already passes in prd.json
-    local story_passes
-    story_passes=$(jq -r ".stories[] | select(.id == $current_story) | .passes" "$prd_path" 2>/dev/null)
-
-    if [[ "$story_passes" == "true" ]]; then
-      # Story passes but we're still on it - find next incomplete story
-      local next_incomplete
-      next_incomplete=$(jq -r '[.stories[] | select(.passes == false)] | sort_by(.priority) | first | .id // empty' "$prd_path")
-
-      if [[ -n "$next_incomplete" ]]; then
-        echo "⚠️  Loop (go/prd): RECONCILE - Story #$current_story already passes in prd.json. Advancing to #$next_incomplete." >&2
-        sed_inplace "s/^current_story_id: .*/current_story_id: $next_incomplete/" "$state_file"
-        CURRENT_STORY_ID="$next_incomplete"
-        reconciled=true
-      else
-        # All stories complete - check if we should end the loop
-        echo "⚠️  Loop (go/prd): RECONCILE - All stories pass in prd.json. Completing loop." >&2
-        # Mark for completion (handled after reconciliation)
-        ALL_STORIES_COMPLETE=true
-      fi
-    fi
-
-    # Sync total_stories count
-    local actual_total
-    actual_total=$(jq '.stories | length' "$prd_path" 2>/dev/null || echo "0")
-    local recorded_total="$TOTAL_STORIES"
-
-    if [[ "$actual_total" != "$recorded_total" ]] && [[ "$actual_total" -gt 0 ]]; then
-      echo "⚠️  Loop (go/prd): RECONCILE - total_stories mismatch (state: $recorded_total, prd: $actual_total). Updating." >&2
-      sed_inplace "s/^total_stories: .*/total_stories: $actual_total/" "$state_file"
-      TOTAL_STORIES="$actual_total"
-    fi
-
-    [[ "$reconciled" == "true" ]]
-  }
-
-  # Parse structured output markers FIRST (before reconciliation)
-  # This ensures we honor Claude's explicit markers over auto-reconciliation
+  # Parse structured output markers FIRST (before checking "all complete")
+  # This allows us to validate a story_complete marker even when all stories show passes=true
   REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
   STORY_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<story_complete[^>]*story_id="([^"]+)"')
-  CURRENT_PASSES=$(jq ".stories[] | select(.id == $CURRENT_STORY_ID) | .passes" "$PRD_PATH" 2>/dev/null || echo "false")
-  STORY_TITLE=$(jq -r ".stories[] | select(.id == $CURRENT_STORY_ID) | .title" "$PRD_PATH")
 
-    # Step 1: Check for story_complete marker (MANDATORY structured output)
-    if [[ -z "$STORY_COMPLETE_MARKER" ]]; then
-      # No marker yet - check what's missing
+  # Current story = first story with passes: false (sorted by priority)
+  CURRENT_STORY_ID=$(jq -r '[.stories[] | select(.passes == false)] | sort_by(.priority) | first | .id // empty' "$PRD_PATH")
+
+  # If all stories complete AND no pending story_complete marker, we're done
+  if [[ -z "$CURRENT_STORY_ID" ]] && [[ -z "$STORY_COMPLETE_MARKER" ]]; then
+    echo "✅ Loop (go/prd): All stories complete!"
+    notify "Loop (go/prd)" "All stories complete! $FEATURE_NAME done"
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"loop_complete\",\"notes\":\"All $TOTAL_STORIES stories complete\"}" "$PRD_PATH"
+    show_loop_summary "$STATE_FILE" "$ITERATION"
+    rm "$STATE_FILE"
+    exit 0
+  fi
+
+  # NOTE: Reconciliation removed - state is now derived from prd.json each time
+  # No drift possible since prd.json IS the source of truth
+
+  STORY_TITLE=""
+  if [[ -n "$CURRENT_STORY_ID" ]]; then
+    STORY_TITLE=$(jq -r ".stories[] | select(.id == $CURRENT_STORY_ID) | .title" "$PRD_PATH")
+  fi
+
+  # ==========================================================================
+  # NEW LOGIC: If story_complete marker present, use that story ID for validation
+  # This handles the case where Claude set passes=true before outputting marker
+  # ==========================================================================
+  if [[ -n "$STORY_COMPLETE_MARKER" ]]; then
+    MARKER_STORY_ID="$STORY_COMPLETE_MARKER"
+    MARKER_PASSES=$(jq ".stories[] | select(.id == $MARKER_STORY_ID) | .passes" "$PRD_PATH" 2>/dev/null || echo "false")
+
+    # Verify the story exists
+    if ! jq -e ".stories[] | select(.id == $MARKER_STORY_ID)" "$PRD_PATH" >/dev/null 2>&1; then
       PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+      SYSTEM_MSG="🔄 Loop (go/prd): Invalid story_id in marker. Story #$MARKER_STORY_ID not found in prd.json"
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
 
-      if [[ "$CURRENT_PASSES" != "true" ]]; then
-        SYSTEM_MSG="🔄 Loop (go/prd): Story #$CURRENT_STORY_ID - working on verification steps.
+    # Verify prd.json shows passes: true for the marked story
+    if [[ "$MARKER_PASSES" != "true" ]]; then
+      PROMPT_TEXT="**prd.json needs update**
+
+You output \`<story_complete story_id=\"$MARKER_STORY_ID\"/>\` but prd.json still shows \`passes: false\` for story #$MARKER_STORY_ID.
+
+**Fix with this edit:**
+\`\`\`
+File: $PRD_PATH
+Find story with id: $MARKER_STORY_ID
+Change: \"passes\": false
+To:     \"passes\": true
+\`\`\`
+
+After updating prd.json, output the marker again:
+\`<story_complete story_id=\"$MARKER_STORY_ID\"/>\`"
+      SYSTEM_MSG="🔄 Loop (go/prd): prd.json shows passes: false for story #$MARKER_STORY_ID. Update it, then re-output marker."
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
+
+    # Verify reviews were done (MANDATORY quality gate)
+    if [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
+      PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+      SYSTEM_MSG="🔄 Loop (go/prd): <story_complete/> found but <reviews_complete/> missing. Run reviews first."
+      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+      exit 0
+    fi
+
+    # All checks passed for marker - use marker story as current for advancement
+    CURRENT_STORY_ID="$MARKER_STORY_ID"
+    # Fall through to commit check and advancement
+  else
+    # No marker yet - check what the current story needs
+    CURRENT_PASSES=$(jq ".stories[] | select(.id == $CURRENT_STORY_ID) | .passes" "$PRD_PATH" 2>/dev/null || echo "false")
+    PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
+
+    if [[ "$CURRENT_PASSES" != "true" ]]; then
+      SYSTEM_MSG="🔄 Loop (go/prd): Story #$CURRENT_STORY_ID - working on verification steps.
 
 **When steps pass, update prd.json:**
 Edit \`$PRD_PATH\` → find story id:$CURRENT_STORY_ID → set \"passes\": true
 
 Then run reviews and output markers."
-      elif [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
-        SYSTEM_MSG="🔄 Loop (go/prd): Story #$CURRENT_STORY_ID passes ✓ Now run reviews.
+    elif [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
+      SYSTEM_MSG="🔄 Loop (go/prd): Story #$CURRENT_STORY_ID passes ✓ Now run reviews.
 
 **Steps:**
 1. Run code-simplifier: \`pr-review-toolkit:code-simplifier\` (max_turns: 15)
@@ -1648,27 +1659,16 @@ Then run reviews and output markers."
 4. Output: \`<reviews_complete/>\`
 5. Commit with story reference
 6. Output: \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
+    else
+      # Reviews done, passes true, but no story_complete marker
+      # FALLBACK: Check if commit exists - if so, auto-advance without marker
+      if git log --oneline -10 2>/dev/null | grep -qiE "(story.*#?${CURRENT_STORY_ID}([^0-9]|$)|#${CURRENT_STORY_ID}([^0-9]|$)|story ${CURRENT_STORY_ID}([^0-9]|$))"; then
+        echo "⚠️  Loop (go/prd): AUTO-ADVANCE - Story #$CURRENT_STORY_ID passes ✓ reviews ✓ commit ✓ (marker missing but work complete)" >&2
+        # Synthesize the marker and fall through to advancement
+        STORY_COMPLETE_MARKER="$CURRENT_STORY_ID"
       else
-        # Reviews done, passes true, but no story_complete marker
-        # FALLBACK: Check if commit exists - if so, auto-advance without marker
-        if git log --oneline -10 2>/dev/null | grep -qiE "(story.*#?${CURRENT_STORY_ID}([^0-9]|$)|#${CURRENT_STORY_ID}([^0-9]|$)|story ${CURRENT_STORY_ID}([^0-9]|$))"; then
-          echo "⚠️  Loop (go/prd): AUTO-ADVANCE - Story #$CURRENT_STORY_ID passes ✓ reviews ✓ commit ✓ (marker missing but work complete)" >&2
-          # Synthesize the marker for downstream processing
-          STORY_COMPLETE_MARKER="$CURRENT_STORY_ID"
-          # Fall through to normal completion logic below
-        else
-          SYSTEM_MSG="🔄 Loop (go/prd): Reviews done ✓ Story passes ✓ Now commit and output:
+        SYSTEM_MSG="🔄 Loop (go/prd): Reviews done ✓ Story passes ✓ Now commit and output:
 \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
-          jq -n \
-            --arg prompt "$PROMPT_TEXT" \
-            --arg msg "$SYSTEM_MSG" \
-            '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-          exit 0
-        fi
-      fi
-
-      # If we get here without a marker but didn't exit, check again
-      if [[ -z "$STORY_COMPLETE_MARKER" ]]; then
         jq -n \
           --arg prompt "$PROMPT_TEXT" \
           --arg msg "$SYSTEM_MSG" \
@@ -1677,34 +1677,15 @@ Then run reviews and output markers."
       fi
     fi
 
-    # Step 2: Verify story_complete marker matches current story
-    if [[ "$STORY_COMPLETE_MARKER" != "$CURRENT_STORY_ID" ]]; then
-      PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$STATE_FILE")
-      SYSTEM_MSG="🔄 Loop (go/prd): story_id mismatch. Expected $CURRENT_STORY_ID, got $STORY_COMPLETE_MARKER"
-      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
+    # If we still don't have a marker, block and wait
+    if [[ -z "$STORY_COMPLETE_MARKER" ]]; then
+      jq -n \
+        --arg prompt "$PROMPT_TEXT" \
+        --arg msg "$SYSTEM_MSG" \
+        '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
       exit 0
     fi
-
-    # Step 3: Verify prd.json shows passes: true
-    if [[ "$CURRENT_PASSES" != "true" ]]; then
-      PROMPT_TEXT="**prd.json needs update**
-
-You output \`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\` but prd.json still shows \`passes: false\` for story #$CURRENT_STORY_ID.
-
-**Fix with this edit:**
-\`\`\`
-File: $PRD_PATH
-Find story with id: $CURRENT_STORY_ID
-Change: \"passes\": false
-To:     \"passes\": true
-\`\`\`
-
-After updating prd.json, output the marker again:
-\`<story_complete story_id=\"$CURRENT_STORY_ID\"/>\`"
-      SYSTEM_MSG="🔄 Loop (go/prd): prd.json shows passes: false. Update it, then re-output story_complete marker."
-      jq -n --arg prompt "$PROMPT_TEXT" --arg msg "$SYSTEM_MSG" '{"decision": "block", "reason": $prompt, "systemMessage": $msg}'
-      exit 0
-    fi
+  fi
 
     # Step 4: Verify reviews were run
     if [[ -z "$REVIEWS_COMPLETE_MARKER" ]]; then
@@ -1717,10 +1698,18 @@ After updating prd.json, output the marker again:
     # Step 5: Verify commit exists
     # Use word boundary ([^0-9]|$) to prevent #1 matching #10, #11, etc.
     if git log --oneline -10 2>/dev/null | grep -qiE "(story.*#?${CURRENT_STORY_ID}([^0-9]|$)|#${CURRENT_STORY_ID}([^0-9]|$)|story ${CURRENT_STORY_ID}([^0-9]|$))"; then
-        # Commit found - log and advance
-        if [[ -f "$PROGRESS_PATH" ]]; then
-          echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"PASSED\",\"notes\":\"Story #$CURRENT_STORY_ID complete\"}" >> "$PROGRESS_PATH"
-        fi
+        # Commit found - get commit hash for logging
+        COMMIT_HASH=$(git log --format="%h" -1 2>/dev/null || echo "unknown")
+
+        # Update story with completed_at and commit in prd.json
+        NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        temp_file="/tmp/prd_update_$$.tmp"
+        jq --arg now "$NOW" --arg commit "$COMMIT_HASH" --argjson sid "$CURRENT_STORY_ID" \
+          '(.stories[] | select(.id == $sid)) |= . + {completed_at: $now, commit: $commit}' \
+          "$PRD_PATH" > "$temp_file" && mv "$temp_file" "$PRD_PATH"
+
+        # Log to embedded log in prd.json
+        log_progress "{\"ts\":\"$NOW\",\"event\":\"story_complete\",\"story_id\":$CURRENT_STORY_ID,\"commit\":\"$COMMIT_HASH\"}" "$PRD_PATH"
 
         # Find next incomplete story
         NEXT_STORY_ID=$(jq -r '[.stories[] | select(.passes == false)] | sort_by(.priority) | first | .id // empty' "$PRD_PATH")
@@ -1729,9 +1718,7 @@ After updating prd.json, output the marker again:
           echo "✅ Loop (go/prd): All stories complete!"
           echo "   Feature '$FEATURE_NAME' is done."
           notify "Loop (go/prd)" "All stories complete! $FEATURE_NAME done"
-          if [[ -f "$PROGRESS_PATH" ]]; then
-            echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"COMPLETED\",\"notes\":\"All $TOTAL_STORIES stories complete for $FEATURE_NAME\"}" >> "$PROGRESS_PATH"
-          fi
+          log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"loop_complete\",\"notes\":\"All $TOTAL_STORIES stories complete\"}" "$PRD_PATH"
           show_loop_summary "$STATE_FILE" "$ITERATION"
           rm "$STATE_FILE"
           exit 0
@@ -1743,9 +1730,8 @@ After updating prd.json, output the marker again:
         NEXT_TITLE=$(echo "$NEXT_STORY" | jq -r '.title')
         INCOMPLETE_COUNT=$(jq '[.stories[] | select(.passes == false)] | length' "$PRD_PATH")
 
-        # Handle skills array (new) or skill string (backward compat)
+        # Handle skills array from story
         NEXT_SKILLS_JSON=$(echo "$NEXT_STORY" | jq -r '.skills // empty')
-        NEXT_SKILL_LEGACY=$(echo "$NEXT_STORY" | jq -r '.skill // empty')
 
         SKILL_FRONTMATTER=""
         SKILL_SECTION=""
@@ -1755,7 +1741,6 @@ After updating prd.json, output the marker again:
         BRANCH_FRONTMATTER=""
 
         if [[ -n "$NEXT_SKILLS_JSON" ]] && [[ "$NEXT_SKILLS_JSON" != "null" ]]; then
-          # New format: skills array
           SKILLS_LIST=$(echo "$NEXT_SKILLS_JSON" | jq -r '.[]' 2>/dev/null || echo "")
           if [[ -n "$SKILLS_LIST" ]]; then
             SKILL_FRONTMATTER="skills: $NEXT_SKILLS_JSON"
@@ -1775,20 +1760,6 @@ This story requires the following skills. **BEFORE implementing**, load each:
             SKILL_SECTION="${SKILL_SECTION}Follow each skill's guidance for implementation patterns and quality standards.
 "
           fi
-        elif [[ -n "$NEXT_SKILL_LEGACY" ]]; then
-          # Legacy format: single skill string
-          SKILL_FRONTMATTER="skill: \"$NEXT_SKILL_LEGACY\""
-          SKILLS_LOG="$NEXT_SKILL_LEGACY"
-          SKILL_SECTION="## Required Skill
-
-This story requires the \`$NEXT_SKILL_LEGACY\` skill. **BEFORE implementing**, invoke:
-
-\`\`\`
-/Skill $NEXT_SKILL_LEGACY
-\`\`\`
-
-Follow the skill's guidance for implementation approach, patterns, and quality standards.
-"
         fi
 
         if [[ -n "$WORKING_BRANCH" ]]; then
@@ -1804,25 +1775,22 @@ branch_setup_done: $BRANCH_SETUP_DONE"
           fi
         fi
 
-        if [[ -f "$PROGRESS_PATH" ]]; then
-          if [[ -n "$SKILLS_LOG" ]]; then
-            echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$NEXT_STORY_ID,\"status\":\"STARTED\",\"skills\":\"$SKILLS_LOG\",\"notes\":\"Beginning story #$NEXT_STORY_ID (requires skills)\"}" >> "$PROGRESS_PATH"
-          else
-            echo "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$NEXT_STORY_ID,\"status\":\"STARTED\",\"notes\":\"Beginning story #$NEXT_STORY_ID\"}" >> "$PROGRESS_PATH"
-          fi
+        # Log story_started to embedded log
+        if [[ -n "$SKILLS_LOG" ]]; then
+          log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"story_started\",\"story_id\":$NEXT_STORY_ID,\"skills\":\"$SKILLS_LOG\"}" "$PRD_PATH"
+        else
+          log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"story_started\",\"story_id\":$NEXT_STORY_ID}" "$PRD_PATH"
         fi
 
-        # Build frontmatter (skills line only if present)
+        # Build minimal frontmatter (state derived from prd.json)
+        # Only keep: loop_type, mode, prd_path, started_at, working_branch
         FRONTMATTER_CONTENT="---
 loop_type: \"go\"
 mode: \"prd\"
 active: true
 prd_path: \"$PRD_PATH\"
 spec_path: \"$SPEC_PATH\"
-progress_path: \"$PROGRESS_PATH\"
-feature_name: \"$FEATURE_NAME\"
-current_story_id: $NEXT_STORY_ID
-total_stories: $TOTAL_STORIES"
+feature_name: \"$FEATURE_NAME\""
         if [[ -n "$SKILL_FRONTMATTER" ]]; then
           FRONTMATTER_CONTENT="$FRONTMATTER_CONTENT
 $SKILL_FRONTMATTER"
@@ -1879,7 +1847,7 @@ ${SKILL_SECTION}## Your Task
 7. **Commit** with type: \`<type>($FEATURE_NAME): story #$NEXT_STORY_ID - $NEXT_TITLE\`
 8. Output markers: \`<reviews_complete/>\` then \`<story_complete story_id=\"$NEXT_STORY_ID\"/>\`
 
-**Hook handles automatically:** progress.txt logging (don't touch it)
+**Hook handles automatically:** progress log in prd.json (don't touch it)
 
 CRITICAL: Only mark the story as passing when it genuinely passes all verification steps."
 
@@ -1929,6 +1897,9 @@ fi
 # Verify iteration completion for ut/e2e loops (structured output control flow)
 # =============================================================================
 if [[ "$ACTIVE_LOOP" == "ut" ]] || [[ "$ACTIVE_LOOP" == "e2e" ]]; then
+  # Get state JSON path (single source of truth for UT/E2E)
+  STATE_JSON=$(get_field "$FRONTMATTER" "state_json")
+
   # Parse markers
   REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
   ITER_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<iteration_complete[^>]*test_file="([^"]+)"')
@@ -1993,8 +1964,9 @@ if [[ "$ACTIVE_LOOP" == "ut" ]] || [[ "$ACTIVE_LOOP" == "e2e" ]]; then
 
   # Step 3: Verify commit exists (or already verified via fallback)
   if [[ "$TEST_COMMIT_FOUND" == "true" ]] || git log --oneline -5 2>/dev/null | grep -qiE "^[a-f0-9]+ (test|e2e)[:(]"; then
-    # All checks passed - log and continue to advance
-    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION_VERIFIED\",\"iteration\":$ITERATION,\"test_file\":\"$ITER_COMPLETE_MARKER\",\"notes\":\"Iteration $ITERATION complete - reviews, marker/fallback, and commit verified\"}"
+    # All checks passed - log to state.json and continue to advance
+    COMMIT_HASH=$(git log --format="%h" -1 2>/dev/null || echo "unknown")
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"iteration_complete\",\"iteration\":$ITERATION,\"test_file\":\"$ITER_COMPLETE_MARKER\",\"commit\":\"$COMMIT_HASH\"}" "$STATE_JSON"
     echo "✓ Loop ($ACTIVE_LOOP): Iteration $ITERATION complete - reviews ✓ commit ✓ $ITER_COMPLETE_MARKER"
   else
     # Markers but no commit - continue working
@@ -2037,27 +2009,31 @@ fi
 case "$ACTIVE_LOOP" in
   go)
     if [[ "$MODE" == "prd" ]]; then
-      CURRENT_STORY_ID=$(get_field "$FRONTMATTER" "current_story_id")
-      SYSTEM_MSG="🔄 Loop (go/prd) iteration $NEXT_ITERATION | Story #$CURRENT_STORY_ID not yet passing"
-      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"story_id\":$CURRENT_STORY_ID,\"status\":\"ITERATION\",\"notes\":\"Iteration $NEXT_ITERATION - story not yet passing\"}"
+      GO_PRD_PATH=$(get_field "$FRONTMATTER" "prd_path")
+      # Derive current story from prd.json (single source of truth)
+      CURRENT_STORY=$(jq -r '[.stories[] | select(.passes == false)] | sort_by(.priority) | first | .id // "unknown"' "$GO_PRD_PATH" 2>/dev/null || echo "unknown")
+      SYSTEM_MSG="🔄 Loop (go/prd) iteration $NEXT_ITERATION | Story #$CURRENT_STORY not yet passing"
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"iteration_started\",\"iteration\":$NEXT_ITERATION,\"story_id\":$CURRENT_STORY}" "$GO_PRD_PATH"
     else
       SYSTEM_MSG="🔄 Loop (go) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
-      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION\",\"iteration\":$NEXT_ITERATION,\"notes\":\"Continuing generic loop\"}"
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"iteration_started\",\"iteration\":$NEXT_ITERATION}"
     fi
     ;;
   ut)
     TARGET_COVERAGE=$(get_field "$FRONTMATTER" "target_coverage")
+    UT_STATE_JSON=$(get_field "$FRONTMATTER" "state_json")
     if [[ -n "$TARGET_COVERAGE" ]] && [[ "$TARGET_COVERAGE" != "0" ]]; then
       SYSTEM_MSG="🔄 Loop (ut) iteration $NEXT_ITERATION | Target: ${TARGET_COVERAGE}% | Output <promise>$COMPLETION_PROMISE</promise> when done"
-      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION\",\"iteration\":$NEXT_ITERATION,\"target_coverage\":$TARGET_COVERAGE,\"notes\":\"Continuing unit test loop\"}"
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"iteration_started\",\"iteration\":$NEXT_ITERATION,\"target_coverage\":$TARGET_COVERAGE}" "$UT_STATE_JSON"
     else
       SYSTEM_MSG="🔄 Loop (ut) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when done"
-      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION\",\"iteration\":$NEXT_ITERATION,\"notes\":\"Continuing unit test loop\"}"
+      log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"iteration_started\",\"iteration\":$NEXT_ITERATION}" "$UT_STATE_JSON"
     fi
     ;;
   e2e)
+    E2E_STATE_JSON=$(get_field "$FRONTMATTER" "state_json")
     SYSTEM_MSG="🔄 Loop (e2e) iteration $NEXT_ITERATION | Output <promise>$COMPLETION_PROMISE</promise> when all flows covered"
-    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"ITERATION\",\"iteration\":$NEXT_ITERATION,\"notes\":\"Continuing E2E test loop\"}"
+    log_progress "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"iteration_started\",\"iteration\":$NEXT_ITERATION}" "$E2E_STATE_JSON"
     ;;
 esac
 
