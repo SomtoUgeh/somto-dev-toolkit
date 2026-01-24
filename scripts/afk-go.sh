@@ -265,29 +265,43 @@ send_notification() {
 # Claude Execution
 # =============================================================================
 
-# Build the claude command
-build_claude_command() {
+# Docker Desktop binary path
+DOCKER_DESKTOP="/Applications/Docker.app/Contents/Resources/bin/docker"
+
+# Run claude command with prompt
+# Note: --print is a boolean flag, prompt is a separate positional argument
+run_claude_cmd() {
   local prompt="$1"
-  local cmd_parts=()
 
   if [[ "$SANDBOX" == "true" ]]; then
-    cmd_parts+=(docker sandbox run --credentials host claude)
+    if [[ "$STREAMING" == "true" ]]; then
+      "$DOCKER_DESKTOP" sandbox run --credentials host claude \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        --print \
+        "$prompt"
+    else
+      "$DOCKER_DESKTOP" sandbox run --credentials host claude \
+        --dangerously-skip-permissions \
+        --print \
+        "$prompt"
+    fi
   else
-    cmd_parts+=(claude)
+    if [[ "$STREAMING" == "true" ]]; then
+      claude \
+        --permission-mode "$PERMISSION_MODE" \
+        --output-format stream-json \
+        --verbose \
+        --print \
+        "$prompt"
+    else
+      claude \
+        --permission-mode "$PERMISSION_MODE" \
+        --print \
+        "$prompt"
+    fi
   fi
-
-  cmd_parts+=(--permission-mode "$PERMISSION_MODE")
-  cmd_parts+=(-p)
-
-  if [[ "$STREAMING" == "true" ]]; then
-    cmd_parts+=(--output-format stream-json)
-    cmd_parts+=(--verbose)
-  else
-    cmd_parts+=(--print)
-  fi
-
-  # Store command for execution (prompt added separately)
-  printf '%s\n' "${cmd_parts[@]}"
 }
 
 # Execute claude with streaming support
@@ -300,19 +314,10 @@ run_claude_streaming() {
   local stream_text='select(.type == "assistant").message.content[]? | select(.type == "text").text // empty | gsub("\n"; "\r\n") | . + "\r\n\n"'
   local final_result='select(.type == "result").result // empty'
 
-  local cmd_args
-  cmd_args=$(build_claude_command "$prompt")
-
-  # Build command array
-  local -a cmd=()
-  while IFS= read -r line; do
-    cmd+=("$line")
-  done <<< "$cmd_args"
-
-  log_verbose "Executing: ${cmd[*]} <prompt>"
+  log_verbose "Executing claude with streaming"
 
   # Execute with streaming
-  "${cmd[@]}" "$prompt" 2>&1 \
+  run_claude_cmd "$prompt" 2>&1 \
     | grep --line-buffered '^{' \
     | tee "$tmpfile" \
     | jq --unbuffered -rj "$stream_text" 2>/dev/null || true
@@ -329,18 +334,9 @@ run_claude_streaming() {
 run_claude_simple() {
   local prompt="$1"
 
-  local cmd_args
-  cmd_args=$(build_claude_command "$prompt")
+  log_verbose "Executing claude without streaming"
 
-  # Build command array
-  local -a cmd=()
-  while IFS= read -r line; do
-    cmd+=("$line")
-  done <<< "$cmd_args"
-
-  log_verbose "Executing: ${cmd[*]} <prompt>"
-
-  "${cmd[@]}" "$prompt" 2>&1
+  run_claude_cmd "$prompt" 2>&1
 }
 
 # Main execution wrapper
@@ -753,7 +749,9 @@ preflight_checks() {
     fi
 
     # Verify docker sandbox is available (Docker Desktop 4.50+ feature)
-    if ! docker sandbox --help &>/dev/null 2>&1; then
+    # Must use Docker Desktop binary directly, not OrbStack
+    local docker_desktop="/Applications/Docker.app/Contents/Resources/bin/docker"
+    if [[ ! -x "$docker_desktop" ]] || ! "$docker_desktop" sandbox --help &>/dev/null 2>&1; then
       log_error "docker sandbox not available."
       echo ""
       echo "The --sandbox flag requires Docker Desktop 4.50+ with the sandbox feature."
@@ -766,6 +764,18 @@ preflight_checks() {
       exit 1
     fi
     log_verbose "Docker sandbox available"
+
+    # Clean up conflicting sandboxes for current workspace
+    # This prevents credential conflict prompts that hang in non-interactive mode
+    local workspace_path
+    workspace_path=$(pwd)
+    local existing_sandbox
+    existing_sandbox=$("$docker_desktop" sandbox ls --format '{{.Name}} {{.Workspace}}' 2>/dev/null | grep " ${workspace_path}$" | awk '{print $1}' || true)
+
+    if [[ -n "$existing_sandbox" ]]; then
+      log_verbose "Removing existing sandbox for workspace: $existing_sandbox"
+      "$docker_desktop" sandbox rm "$existing_sandbox" >/dev/null 2>&1 || true
+    fi
   fi
 
   # Check jq for streaming
