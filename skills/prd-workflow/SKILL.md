@@ -12,6 +12,9 @@ version: 1.0.0
 
 # PRD Workflow - Feature Planning
 
+**Current branch:** !`git branch --show-current 2>/dev/null || echo "not in git repo"`
+**Existing plans:** !`ls plans/ 2>/dev/null | head -5 || echo "none"`
+
 The PRD (Product Requirements Document) workflow transforms ideas into atomic,
 implementable stories through structured interview, research, and specification.
 
