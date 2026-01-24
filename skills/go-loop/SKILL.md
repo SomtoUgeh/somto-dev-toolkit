@@ -12,6 +12,8 @@ version: 1.0.0
 
 # Go Loop - Iterative Task Execution
 
+**Current branch:** !`git branch --show-current 2>/dev/null || echo "not in git repo"`
+
 The go loop executes PRD stories or generic tasks iteratively, with two distinct modes
 for different levels of autonomy and oversight.
 

@@ -10,14 +10,16 @@ agent: general-purpose
 
 Sync your active loop (go, ut, e2e) work items to Claude's Task system for Ctrl+T visibility.
 
+**Session:** `${CLAUDE_SESSION_ID}`
+
+## Current Loop State
+
+Active state files:
+!`ls .claude/*-loop-*.local.md 2>/dev/null || echo "NONE"`
+
 ## Your Task
 
-1. **Find active loop state file:**
-   ```bash
-   ls .claude/*-loop-*.local.md 2>/dev/null | head -1
-   ```
-
-2. **If no state file found:** Say "No active loop found. Start a loop with /go, /ut, or /e2e first."
+1. **If no state file above (shows "NONE"):** Say "No active loop found. Start a loop with /go, /ut, or /e2e first."
 
 3. **Parse loop type from frontmatter** (between first two `---` lines):
    - Read `loop_type:` field

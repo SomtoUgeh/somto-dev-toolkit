@@ -11,6 +11,8 @@ version: 1.0.0
 
 # E2E Test Loop - Browser Automation Testing
 
+**Current branch:** !`git branch --show-current 2>/dev/null || echo "not in git repo"`
+
 The E2E test loop systematically adds end-to-end tests for user flows using
 Playwright, with page objects for maintainable test code.
 

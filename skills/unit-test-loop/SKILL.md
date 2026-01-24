@@ -11,6 +11,8 @@ version: 1.0.0
 
 # Unit Test Loop - Coverage Improvement
 
+**Current branch:** !`git branch --show-current 2>/dev/null || echo "not in git repo"`
+
 The unit test loop systematically improves test coverage through iterative,
 focused test writing with mandatory quality reviews.
 
