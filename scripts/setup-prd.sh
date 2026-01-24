@@ -90,6 +90,7 @@ phase_iteration: 0
 working_branch: "$WORKING_BRANCH"
 branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+task_list_synced: false
 ---
 
 # PRD Loop: Phase 1 - Input Classification

@@ -2,6 +2,8 @@
 name: deslop
 description: Remove AI-generated code slop from current branch
 argument-hint: "[optional: specific file path]"
+context: fork
+agent: general-purpose
 ---
 
 # Remove AI Code Slop

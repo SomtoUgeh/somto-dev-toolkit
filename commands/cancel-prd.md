@@ -3,6 +3,7 @@ name: cancel-prd
 description: "Cancel active PRD loop"
 allowed-tools: ["Bash(ls .claude/prd-loop-*.local.md:*)", "Bash(rm .claude/prd-loop-*.local.md)", "Read(.claude/prd-loop-*.local.md)"]
 hide-from-slash-command-tool: "true"
+disable-model-invocation: true
 ---
 
 # Cancel PRD Loop

@@ -1,6 +1,7 @@
 ---
 name: ut-help
 description: "Explain the unit test loop technique"
+disable-model-invocation: true
 ---
 
 # Unit Test Loop Help

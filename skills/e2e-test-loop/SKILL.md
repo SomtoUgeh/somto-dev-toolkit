@@ -133,6 +133,26 @@ Output when critical user flows are covered:
 
 Only output when genuinely complete - do not exit prematurely.
 
+## Task Integration (Optional)
+
+### On Flow Identification
+
+For each user flow to test:
+```
+TaskCreate({
+  subject: "E2E: {flow_name}",
+  description: "Test: {flow_description}",
+  activeForm: "Testing {flow_name} flow",
+  metadata: { loop: "e2e", flow_name: "{name}" }
+})
+```
+
+Set `blockedBy` for dependent flows (checkout depends on login).
+
+### On Flow Test Complete
+
+`TaskUpdate(task_id, status: "completed")`
+
 ## Command Reference
 
 ```bash

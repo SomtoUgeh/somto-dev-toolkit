@@ -3,6 +3,7 @@ name: cancel-ut
 description: "Cancel active unit test loop"
 allowed-tools: ["Bash(ls .claude/ut-loop-*.local.md:*)", "Bash(rm .claude/ut-loop-*.local.md)", "Read(.claude/ut-loop-*.local.md)", "Bash(jq *)"]
 hide-from-slash-command-tool: "true"
+disable-model-invocation: true
 ---
 
 # Cancel Unit Test Loop

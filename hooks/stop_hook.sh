@@ -703,6 +703,16 @@ if [[ "$ACTIVE_LOOP" == "prd" ]]; then
 
     # <reviews_complete/>
     REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
+
+    # <tasks_synced/>
+    TASKS_SYNCED_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<tasks_synced/>')
+  fi
+
+  # Update task_list_synced when marker detected
+  if [[ -n "$TASKS_SYNCED_MARKER" ]]; then
+    if grep -q '^task_list_synced:' "$STATE_FILE"; then
+      sed_inplace "s/^task_list_synced: .*/task_list_synced: true/" "$STATE_FILE"
+    fi
   fi
 
   # Validate next phase value from marker (if provided)
@@ -1567,6 +1577,14 @@ if [[ "$ACTIVE_LOOP" == "go" ]] && [[ "$MODE" == "prd" ]]; then
   # This allows us to validate a story_complete marker even when all stories show passes=true
   REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
   STORY_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<story_complete[^>]*story_id="([^"]+)"')
+  TASKS_SYNCED_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<tasks_synced/>')
+
+  # Update task_list_synced when marker detected
+  if [[ -n "$TASKS_SYNCED_MARKER" ]]; then
+    if grep -q '^task_list_synced:' "$STATE_FILE"; then
+      sed_inplace "s/^task_list_synced: .*/task_list_synced: true/" "$STATE_FILE"
+    fi
+  fi
 
   # Current story = first story with passes: false (sorted by priority)
   CURRENT_STORY_ID=$(jq -r '[.stories[] | select(.passes == false)] | sort_by(.priority) | first | .id // empty' "$PRD_PATH")
@@ -1733,6 +1751,15 @@ Then run reviews and output markers."
         # Handle skills array from story
         NEXT_SKILLS_JSON=$(echo "$NEXT_STORY" | jq -r '.skills // empty')
 
+        # Extract task_id for this story from story_tasks (if synced)
+        # Don't use get_field - it breaks JSON. Extract directly from YAML.
+        NEXT_TASK_ID=""
+        STORY_TASKS_JSON=$(sed -n "s/^story_tasks: '\\(.*\\)'/\\1/p" "$STATE_FILE" | head -1)
+        if [[ -n "$STORY_TASKS_JSON" ]] && [[ "$STORY_TASKS_JSON" != "{}" ]]; then
+          # Parse JSON to find task for this story (using jq for safety)
+          NEXT_TASK_ID=$(echo "$STORY_TASKS_JSON" | jq -r ".\"$NEXT_STORY_ID\" // empty" 2>/dev/null)
+        fi
+
         SKILL_FRONTMATTER=""
         SKILL_SECTION=""
         SKILLS_LOG=""
@@ -1851,6 +1878,17 @@ ${SKILL_SECTION}## Your Task
 
 CRITICAL: Only mark the story as passing when it genuinely passes all verification steps."
 
+        # Add task reference if synced
+        if [[ -n "$NEXT_TASK_ID" ]]; then
+          BODY_CONTENT="$BODY_CONTENT
+
+## Task System (Ctrl+T)
+
+**Task:** \`$NEXT_TASK_ID\`
+- On story start: \`TaskUpdate(\"$NEXT_TASK_ID\", status: \"in_progress\")\`
+- On story complete: \`TaskUpdate(\"$NEXT_TASK_ID\", status: \"completed\")\`"
+        fi
+
         # Write state file atomically
         write_state_file "$STATE_FILE" "$FRONTMATTER_CONTENT$BODY_CONTENT"
 
@@ -1903,6 +1941,14 @@ if [[ "$ACTIVE_LOOP" == "ut" ]] || [[ "$ACTIVE_LOOP" == "e2e" ]]; then
   # Parse markers
   REVIEWS_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<reviews_complete/>')
   ITER_COMPLETE_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<iteration_complete[^>]*test_file="([^"]+)"')
+  TASKS_SYNCED_MARKER=$(extract_regex_last "$LAST_OUTPUT" '<tasks_synced/>')
+
+  # Update task_list_synced when marker detected
+  if [[ -n "$TASKS_SYNCED_MARKER" ]]; then
+    if grep -q '^task_list_synced:' "$STATE_FILE"; then
+      sed_inplace "s/^task_list_synced: .*/task_list_synced: true/" "$STATE_FILE"
+    fi
+  fi
 
   # Fallback detection: Check for test commit in git log (ralph-loop style)
   # If test commit exists but markers missing, we can still advance

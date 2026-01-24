@@ -3,6 +3,7 @@ name: cancel-go
 description: "Cancel active go loop"
 allowed-tools: ["Bash(ls .claude/go-loop-*.local.md:*)", "Bash(rm .claude/go-loop-*.local.md)", "Read(.claude/go-loop-*.local.md)", "Bash(jq *)"]
 hide-from-slash-command-tool: "true"
+disable-model-invocation: true
 ---
 
 # Cancel Go Loop

@@ -123,6 +123,45 @@ Run `/go --help` for full options or use these common patterns:
 /go plans/feature/prd.json --afk --stream
 ```
 
+## Task Integration (Optional)
+
+For visibility via Ctrl+T and cross-session resume, sync PRD stories to Claude's Task system.
+
+### On Loop Start (after reading prd.json)
+
+1. Call `TaskList()` to check for existing tasks
+2. If no tasks with `metadata.prd_path` matching this PRD:
+   ```
+   For each story where passes == false:
+     TaskCreate({
+       subject: "Story {id}: {title}",
+       description: "Steps:\n- {step1}\n- {step2}...",
+       activeForm: "Implementing story {id}",
+       metadata: { loop: "go", prd_path: "{path}", story_id: {id} }
+     })
+   ```
+3. Set `blockedBy` based on priority (story 2 blocked by story 1, etc.)
+4. **Update state file** with task mappings:
+   ```bash
+   # Edit .claude/go-loop-{session}.local.md frontmatter:
+   story_tasks: '{"1": "task-id-1", "2": "task-id-2"}'
+   ```
+5. Output `<tasks_synced/>` to signal completion
+
+### During Work
+
+- On story start: `TaskUpdate(task_id, status: "in_progress")`
+- On story complete: `TaskUpdate(task_id, status: "completed")`
+
+The hook will include the task_id in prompts once `story_tasks` is populated.
+
+### Cross-Session Resume
+
+After `/clear`, say "check tasks" or "what tasks are pending":
+1. `TaskList()` returns pending tasks with metadata
+2. Read `metadata.prd_path` to find the PRD file
+3. Resume work on first pending story
+
 ## Additional Resources
 
 ### Reference Files

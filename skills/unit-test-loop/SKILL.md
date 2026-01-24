@@ -107,6 +107,28 @@ Output when coverage target reached:
 
 Only output when genuinely complete - do not exit prematurely.
 
+## Task Integration (Optional)
+
+### On Coverage Analysis Complete
+
+For each file below target coverage:
+```
+TaskCreate({
+  subject: "Test: {filename} ({current}% → {target}%)",
+  description: "Improve coverage for {full_path}",
+  activeForm: "Testing {filename}",
+  metadata: { loop: "ut", file_path: "{path}", current: {N}, target: {M} }
+})
+```
+
+### On File Coverage Met
+
+`TaskUpdate(task_id, status: "completed")`
+
+### Dynamic Discovery
+
+When new files are found during iteration, create additional Tasks.
+
 ## Command Reference
 
 ```bash

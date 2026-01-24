@@ -232,6 +232,8 @@ cat > "$STATE_JSON" <<EOF
   "custom_prompt": "$CUSTOM_PROMPT",
   "max_iterations": $MAX_ITERATIONS,
   "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "task_list_synced": false,
+  "flow_tasks": {},
   "iterations": [],
   "log": [
     {"ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "event": "loop_started", "e2e_folder": "$E2E_FOLDER"}
@@ -255,6 +257,8 @@ custom_prompt: "$CUSTOM_PROMPT"
 working_branch: "$WORKING_BRANCH"
 branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+task_list_synced: false
+flow_tasks: '{}'
 ---
 
 # E2E Test Development Loop

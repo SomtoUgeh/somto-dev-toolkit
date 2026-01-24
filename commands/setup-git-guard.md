@@ -2,6 +2,7 @@
 name: setup-git-guard
 description: Install git safety guard hook at project or user scope
 argument-hint: "[project|user]"
+context: fork
 ---
 
 # Git Safety Guard Setup

@@ -282,6 +282,8 @@ completion_promise: $COMPLETION_PROMISE_YAML
 working_branch: "$WORKING_BRANCH"
 branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+task_list_synced: false
+story_tasks: '{}'
 ---
 
 # go Loop
@@ -458,6 +460,8 @@ max_iterations: $MAX_ITERATIONS
 working_branch: "$WORKING_BRANCH"
 branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+task_list_synced: false
+story_tasks: '{}'
 ---
 
 # go Loop: $FEATURE_NAME

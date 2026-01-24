@@ -275,6 +275,8 @@ cat > "$STATE_JSON" <<EOF
   "custom_prompt": "$CUSTOM_PROMPT",
   "max_iterations": $MAX_ITERATIONS,
   "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "task_list_synced": false,
+  "file_tasks": {},
   "iterations": [],
   "log": [
     {"ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "event": "loop_started", "target_coverage": $TARGET_COVERAGE}
@@ -298,6 +300,8 @@ custom_prompt: "$CUSTOM_PROMPT"
 working_branch: "$WORKING_BRANCH"
 branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+task_list_synced: false
+file_tasks: '{}'
 ---
 
 # Test Coverage Improvement Loop

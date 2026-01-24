@@ -1,6 +1,7 @@
 ---
 name: go-help
 description: Help for the go loop command
+disable-model-invocation: true
 ---
 
 # Go Loop Help

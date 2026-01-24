@@ -2,6 +2,8 @@
 name: fork-detect
 description: Search past sessions semantically and select one to fork from
 argument-hint: "<what you want to do>"
+context: fork
+agent: general-purpose
 ---
 
 # Fork Detection

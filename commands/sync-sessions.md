@@ -2,6 +2,7 @@
 name: sync-sessions
 description: Sync Claude Code sessions to qmd index
 argument-hint: "[--full]"
+context: fork
 ---
 
 # Sync Sessions
