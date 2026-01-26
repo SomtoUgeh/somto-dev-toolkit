@@ -372,7 +372,29 @@ validate_prd() {
     exit 1
   fi
 
-  log_verbose "PRD validated: $story_count stories"
+  # Validate: no story has >7 steps
+  local oversized_stories
+  oversized_stories=$(jq -r '[.stories[] | select((.steps | length) > 7) | {id, title, steps: (.steps | length)}] | .[] | "Story #\(.id) \"\(.title)\" has \(.steps) steps (max 7)"' "$PRD_PATH" 2>/dev/null || echo "")
+  if [[ -n "$oversized_stories" ]]; then
+    log_error "Stories with >7 steps detected (must split before running):"
+    echo "$oversized_stories" | while read -r line; do
+      log_error "  $line"
+    done
+    exit 1
+  fi
+
+  # Validate: no duplicate priorities
+  local unique_priorities total_priorities
+  unique_priorities=$(jq '[.stories[].priority] | unique | length' "$PRD_PATH")
+  total_priorities=$(jq '.stories | length' "$PRD_PATH")
+  if [[ "$unique_priorities" -ne "$total_priorities" ]]; then
+    log_error "Duplicate priorities detected! Each story must have unique priority."
+    log_error "Duplicates:"
+    jq -r '[.stories | group_by(.priority)[] | select(length > 1) | .[]] | .[] | "  Story #\(.id) \"\(.title)\" has priority \(.priority)"' "$PRD_PATH"
+    exit 1
+  fi
+
+  log_verbose "PRD validated: $story_count stories, all atomic, unique priorities"
 }
 
 get_prd_status() {
