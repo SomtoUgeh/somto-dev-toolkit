@@ -50,20 +50,27 @@ Run /setup-memory again after installing qmd.
 
 Then STOP and wait for them to install.
 
-### Step 1b: Install Python dependencies (optional but recommended)
+### Step 1b: Install YAKE for better keyword extraction
 
-For better keyword extraction using YAKE:
+YAKE improves session search by extracting meaningful keywords. Auto-install (best effort):
 
 ```bash
-cd "${CLAUDE_PLUGIN_ROOT}" && uv pip install yake
+# Try uv first, then pip3, then pip
+if command -v uv &>/dev/null; then
+    uv pip install --system yake 2>/dev/null || uv pip install yake 2>/dev/null || true
+elif command -v pip3 &>/dev/null; then
+    pip3 install --user yake 2>/dev/null || pip3 install --break-system-packages yake 2>/dev/null || true
+elif command -v pip &>/dev/null; then
+    pip install --user yake 2>/dev/null || true
+fi
 ```
 
-Or without uv:
+Verify installation:
 ```bash
-pip install yake
+python3 -c "import yake; print('YAKE installed ✓')" 2>/dev/null || echo "YAKE not installed (fallback mode will be used)"
 ```
 
-**Note**: Hooks work without YAKE installed - they fall back to simple word extraction.
+**Note**: If installation fails, hooks still work using simple word extraction as fallback.
 
 ## Installation Steps
 
