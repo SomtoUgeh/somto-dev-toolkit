@@ -1,3 +1,7 @@
 .claude/.current_session
 __pycache__/
 __pycache__/
+
+# Blog post drafts
+BLOG-*.md
+session-*.svg
