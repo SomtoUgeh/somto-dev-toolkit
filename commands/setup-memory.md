@@ -55,13 +55,15 @@ Then STOP and wait for them to install.
 YAKE improves session search by extracting meaningful keywords. Auto-install (best effort):
 
 ```bash
-# Try uv first, then pip3, then pip
-if command -v uv &>/dev/null; then
-    uv pip install --system yake 2>/dev/null || uv pip install yake 2>/dev/null || true
-elif command -v pip3 &>/dev/null; then
-    pip3 install --user yake 2>/dev/null || pip3 install --break-system-packages yake 2>/dev/null || true
-elif command -v pip &>/dev/null; then
-    pip install --user yake 2>/dev/null || true
+# Check if already installed
+if python3 -c "import yake" 2>/dev/null; then
+    echo "YAKE already installed ✓"
+else
+    # Try pip3 with --break-system-packages (works on modern macOS/Linux)
+    pip3 install --user --break-system-packages yake 2>/dev/null || \
+    pip3 install --user yake 2>/dev/null || \
+    pip install --user yake 2>/dev/null || \
+    echo "YAKE install failed (fallback mode will be used)"
 fi
 ```
 
