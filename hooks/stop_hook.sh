@@ -333,7 +333,7 @@ PRD_STATE=".claude/prd-loop-${SESSION_ID}.local.md"
 # =============================================================================
 # Session Indexing for qmd (background, non-blocking)
 # =============================================================================
-# This trap runs on exit to index the current session for /fork-detect
+# This trap runs on exit to index the current session for memory/fork suggestions
 # Only indexes if no active loop (session truly ending) and qmd is available
 index_session_for_qmd() {
   # Skip if a loop is active (will block, not truly exiting)

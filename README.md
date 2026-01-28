@@ -9,7 +9,7 @@ Personal collection of Claude Code tools and skills.
 /plugin install somto-dev-toolkit@somto-dev-toolkit
 ```
 
-## Commands (15)
+## Commands (13)
 
 ### Loop Commands
 
@@ -41,8 +41,7 @@ Personal collection of Claude Code tools and skills.
 
 | Command | Description |
 |---------|-------------|
-| `/fork-detect` | Search past sessions semantically and fork |
-| `/sync-sessions` | Sync Claude Code sessions to qmd index |
+| `/setup-memory` | Setup smart session memory system |
 | `/deslop` | Remove AI-generated code slop from branch |
 | `/setup-git-guard` | Install git safety guard hook |
 
@@ -62,14 +61,15 @@ Personal collection of Claude Code tools and skills.
 | `technical-svg-diagrams` | Generate clean, minimal SVG diagrams |
 | `biome-gritql` | GritQL patterns for Biome linting |
 
-## Hooks (4)
+## Hooks (6)
 
 | Event | Purpose |
 |-------|---------|
 | `SessionStart` | Initialize session state |
 | `Stop` | Enforce iterative workflows (go/ut/e2e/prd loops) |
 | `SubagentStop` | Validate research agent outputs |
-| `PreToolUse` | Git safety guard (blocks destructive commands) |
+| `PreToolUse` | Git safety guard + memory injection (requires qmd) |
+| `UserPromptSubmit` | Fork suggestion for similar past sessions (requires qmd) |
 
 ## Usage Examples
 
@@ -96,12 +96,37 @@ Personal collection of Claude Code tools and skills.
 /setup-git-guard project  # or 'user' for global
 ```
 
+### Session Memory (requires qmd)
+```
+# One-time setup
+/setup-memory
+
+# Or manually:
+brew install qmd  # macOS
+cargo install qmd  # Linux/WSL
+
+qmd init -c claude-sessions ~/.claude/qmd-sessions
+./scripts/setup-scheduled-sync.sh
+```
+
+Once configured:
+- **PreToolUse**: Injects relevant past session context when using Read/Edit/Write/Glob/Grep
+- **UserPromptSubmit**: Suggests forking when starting similar work
+
 ## Updating
 
 ```
 /plugin marketplace update
 /plugin update somto-dev-toolkit@somto-dev-toolkit
 ```
+
+## Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| macOS | ✅ Full | launchd for scheduling |
+| Linux | ✅ Full | cron for scheduling |
+| WSL | ✅ Full | cron (ensure `sudo service cron start`) |
 
 ## License
 
