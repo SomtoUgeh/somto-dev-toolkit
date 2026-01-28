@@ -49,8 +49,10 @@ Each iteration follows this exact sequence:
 3. **Write ONE test** - Validate real user behavior
 4. **Run linters** - Ensure code quality
 5. **Verify improvement** - Run coverage again
-6. **Run reviewers** - code-simplifier + kieran reviewer (MANDATORY)
+6. **Run reviewers** - code-simplifier + kieran reviewer with `run_in_background: true` (MANDATORY)
 7. **Commit** - `test(<file>): describe behavior`
+
+**Tip:** Background reviewers let you continue work while they run. See **`background-agents`** skill.
 
 ## React Testing Library Patterns
 
@@ -90,6 +92,18 @@ expect(button).toBeDisabled()  // Not: expect(button.disabled).toBe(true)
 
 // Avoid act() - RTL handles it
 await screen.findByText('Loaded')  // Not: act(() => ...)
+```
+
+## Commitment Protocol
+
+Before each iteration, **declare completion criteria**:
+
+```
+"This iteration is complete when:
+- ONE test validates [specific behavior]
+- Test passes, coverage improved
+- Reviewers addressed
+- Committed"
 ```
 
 ## Quality Standards
@@ -140,3 +154,9 @@ When new files are found during iteration, create additional Tasks.
 /ut "prompt" --test-command "yarn test:unit"   # Custom test command
 /cancel-ut                                      # Cancel loop
 ```
+
+## Additional Resources
+
+### Related Skills
+
+- **`background-agents`** - Patterns for `run_in_background: true`, parallel reviewers

@@ -76,6 +76,35 @@ External bash loop for truly hands-off execution. Ralph Wiggum style.
 
 Treat ALL code as production code. No shortcuts, no "good enough for now". Every line you write will be maintained, extended, and debugged by others. Fight entropy.
 
+## Commitment Protocol
+
+**Before starting each story/iteration, declare your completion criteria:**
+
+### PRD Mode
+Read the story's `steps` array and declare:
+```
+"I will complete story #N when ALL of these are verified:
+- [Step 1 from story]
+- [Step 2 from story]
+- ...
+- Tests pass
+- Lint/typecheck pass
+- Reviewers addressed
+- Committed with story #N reference"
+```
+
+### Generic Mode
+Declare what the completion promise means:
+```
+"I will output <promise>TEXT</promise> when:
+- [Specific outcome 1]
+- [Specific outcome 2]
+- All tests pass
+- Code is production-ready"
+```
+
+**Work until ALL declared criteria are verified.** Do not set `passes: true` or emit promise until you've checked each criterion against reality.
+
 ## Your Task
 
 Read the generated state file (path shown in setup output) and begin work.
@@ -145,17 +174,17 @@ The hook validates these conditions before advancing to next story:
 
 ---
 
-## MANDATORY Pre-Commit Reviews (PARALLEL)
+## MANDATORY Pre-Commit Reviews (PARALLEL + BACKGROUND)
 
 **REQUIRED**: You MUST run these agents before EVERY commit. No exceptions. Do not skip.
 
-### Launch ALL Reviewers IN PARALLEL (Single Message)
+### Launch ALL Reviewers IN PARALLEL (Single Message, Background Optional)
 
-In ONE message, spawn multiple Task tool calls:
+In ONE message, spawn multiple Task tool calls. Use `run_in_background: true` to continue work while reviews run:
 
 ```
-Task 1: subagent_type="pr-review-toolkit:code-simplifier" (max_turns: 15)
-Task 2: subagent_type="<appropriate-kieran-reviewer>" (max_turns: 20)
+Task 1: subagent_type="pr-review-toolkit:code-simplifier" (max_turns: 15, run_in_background: true)
+Task 2: subagent_type="<appropriate-kieran-reviewer>" (max_turns: 20, run_in_background: true)
 ```
 
 **Kieran reviewer by language:**
@@ -167,7 +196,7 @@ Task 2: subagent_type="<appropriate-kieran-reviewer>" (max_turns: 20)
 - **Database/migrations**: `compound-engineering:review:data-integrity-guardian`
 - **Frontend races**: `compound-engineering:review:julik-frontend-races-reviewer`
 
-All agents run in parallel → results return together → faster reviews.
+All agents run in parallel → check progress with `/tasks` or `Ctrl+T` → retrieve with `TaskOutput`.
 
 ### After Reviews Complete
 

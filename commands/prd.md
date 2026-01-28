@@ -128,6 +128,8 @@ Classify input type (empty/file/folder/idea) and extract feature context.
 
 ### Phase 2: Deep Interview
 
+**Commitment:** "I will ask 8-10+ questions covering: core problem, success criteria, MVP scope, technical constraints, UX flows, edge cases, error states, and tradeoffs before advancing to spec."
+
 Conduct thorough interview using AskUserQuestion. Interview in waves:
 
 - **Wave 1** (3-4 questions): Core problem, success criteria, MVP scope
@@ -137,13 +139,17 @@ Conduct thorough interview using AskUserQuestion. Interview in waves:
 
 ### Phase 2.5: Research
 
-Spawn ALL research agents IN PARALLEL (single message, multiple Task calls):
+Spawn ALL research agents IN PARALLEL with `run_in_background: true` (single message, multiple Task calls):
 
 ```
-Task 1: subagent_type="somto-dev-toolkit:prd-codebase-researcher" (max_turns: 30)
-Task 2: subagent_type="compound-engineering:research:git-history-analyzer" (max_turns: 30)
-Task 3: subagent_type="somto-dev-toolkit:prd-external-researcher" (max_turns: 15)
+Task 1: subagent_type="somto-dev-toolkit:prd-codebase-researcher" (max_turns: 30, run_in_background: true)
+Task 2: subagent_type="compound-engineering:research:git-history-analyzer" (max_turns: 30, run_in_background: true)
+Task 3: subagent_type="somto-dev-toolkit:prd-external-researcher" (max_turns: 15, run_in_background: true)
 ```
+
+**While agents run:** Continue preparing Wave 2 questions, review spec outline, discuss priorities with user.
+
+**Check progress:** `/tasks` or `Ctrl+T` to see status. Use `TaskOutput` to retrieve results when ready.
 
 **Optional: agent-browser** for UI/competitor analysis:
 ```bash
@@ -219,23 +225,27 @@ Discover relevant skills and extract implementation patterns:
 
 ### Phase 3.5: Review Gate
 
-Spawn ALL reviewers IN PARALLEL (single message, multiple Task calls):
+Spawn ALL reviewers IN PARALLEL with `run_in_background: true` (single message, multiple Task calls):
 
 **Core reviewers (always run):**
 ```
-subagent_type="compound-engineering:workflow:spec-flow-analyzer" (max_turns: 20)
-subagent_type="compound-engineering:review:architecture-strategist" (max_turns: 20)
-subagent_type="compound-engineering:review:security-sentinel" (max_turns: 20)
-subagent_type="compound-engineering:review:performance-oracle" (max_turns: 20)
-subagent_type="compound-engineering:review:code-simplicity-reviewer" (max_turns: 15)
-subagent_type="compound-engineering:review:pattern-recognition-specialist" (max_turns: 20)
+subagent_type="compound-engineering:workflow:spec-flow-analyzer" (max_turns: 20, run_in_background: true)
+subagent_type="compound-engineering:review:architecture-strategist" (max_turns: 20, run_in_background: true)
+subagent_type="compound-engineering:review:security-sentinel" (max_turns: 20, run_in_background: true)
+subagent_type="compound-engineering:review:performance-oracle" (max_turns: 20, run_in_background: true)
+subagent_type="compound-engineering:review:code-simplicity-reviewer" (max_turns: 15, run_in_background: true)
+subagent_type="compound-engineering:review:pattern-recognition-specialist" (max_turns: 20, run_in_background: true)
 ```
 
 **Domain-specific (if applicable):**
 ```
-subagent_type="compound-engineering:review:data-integrity-guardian" (data models)
-subagent_type="compound-engineering:review:agent-native-reviewer" (AI features)
+subagent_type="compound-engineering:review:data-integrity-guardian" (data models, run_in_background: true)
+subagent_type="compound-engineering:review:agent-native-reviewer" (AI features, run_in_background: true)
 ```
+
+**While reviewers run:** Review spec yourself, refine wording, discuss open questions with user.
+
+**Check progress:** `/tasks` or `Ctrl+T`. Retrieve results with `TaskOutput` when all complete.
 
 Add critical findings to spec's "Review Findings" section.
 
@@ -270,13 +280,35 @@ If BLOCK, address issues then re-output PROCEED.
 
 ### Phase 4: PRD JSON Generation
 
+**Commitment:** "I will generate atomic stories where each has ≤7 verification steps, touches ≤3 files, is independently testable, and has no 'and' in the title. I will validate with jq before marking complete."
+
 Generate `plans/<feature>/prd.json` with **atomic** stories.
 
-**Story size rules (ENFORCE):**
+**Story size rules (HARD LIMITS - ENFORCED):**
 - Each story = ONE iteration (~15-30 min)
-- If >7 verification steps → too big, split
+- **MAX 7 steps per story** - If >7, MUST split before proceeding
 - If >3 files touched → consider splitting
 - If "and" in title → probably 2 stories
+
+**Priority rules (MANDATORY):**
+- Use **integer spacing of 10** (10, 20, 30...) to allow insertion
+- NEVER use same priority for multiple stories
+- When splitting a story mid-loop, use decimals (e.g., 10.1, 10.2, 10.3)
+- Before finalizing: verify `jq '[.stories[].priority] | unique | length == (.stories | length)'`
+
+**Pre-commit validation (run before outputting phase marker):**
+```bash
+# Validate no story has >7 steps
+jq -e '[.stories[] | select((.steps | length) > 7)] | length == 0' prd.json
+
+# Validate no duplicate priorities
+jq -e '([.stories[].priority] | unique | length) == (.stories | length)' prd.json
+
+# Validate priorities are sorted
+jq -e '[.stories[].priority] | . == sort' prd.json
+```
+
+If any validation fails, fix before proceeding.
 
 **prd.json schema (single source of truth):**
 ```json
@@ -402,6 +434,43 @@ Unlike retry-based loops, the PRD workflow **never stops on missing markers**:
 1. Phase 6 marker: `<phase_complete phase="6"/>`
 2. File detection: spec.md and prd.json exist in `plans/<feature>/`
 3. Explicit promise: `<promise>PRD COMPLETE</promise>` (immediate exit)
+
+---
+
+## Background Agent Patterns
+
+**Why background?** Returns control to you immediately. Continue discussing, refine questions, kick off more work while agents run.
+
+### Launching Agents in Background
+
+Add `run_in_background: true` to Task calls for non-blocking execution:
+
+```
+Task(
+  subagent_type="...",
+  prompt="...",
+  run_in_background: true
+)
+```
+
+**Best for:**
+- Phase 2.5 research agents (long-running, independent)
+- Phase 3.5 review agents (can review spec while they run)
+
+**Check progress:**
+- `/tasks` - list all background tasks
+- `Ctrl+T` - toggle task list view
+- `TaskOutput(task_id="...", block=false)` - check specific agent
+
+**Retrieve results:**
+- Background agents write to output files
+- Use `Read` tool on output_file path returned when launching
+- Or `TaskOutput(task_id="...", block=true)` to wait for completion
+
+### When NOT to Background
+
+- Complexity estimator (Phase 5.5) - need result immediately for next phase
+- Any agent whose output gates the next step
 
 ---
 

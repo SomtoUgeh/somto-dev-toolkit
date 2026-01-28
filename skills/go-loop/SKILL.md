@@ -90,13 +90,31 @@ Recommended approach when starting with a new PRD:
 2. **Graduate to HITL** - Let the hook continue automatically when comfortable
 3. **Go AFK** - Use `--afk` for overnight runs once workflow is proven
 
+## Commitment Protocol
+
+Before starting each story/iteration, **declare completion criteria upfront**:
+
+```
+"I will complete story #N when ALL verified:
+- [Each step from story's steps array]
+- Tests pass
+- Lint/typecheck pass
+- Reviewers addressed
+- Committed with story #N reference"
+```
+
+This creates accountability. Work until ALL declared criteria are verified before setting `passes: true`.
+
 ## Quality Expectations
 
 Both modes enforce the same quality standards:
 
 - **Production code only** - No shortcuts, no "good enough for now"
-- **Pre-commit reviews required** - code-simplifier + kieran reviewer in parallel
+- **Pre-commit reviews required** - code-simplifier + kieran reviewer in parallel with `run_in_background: true`
 - **Atomic commits** - Each story = one commit with story reference
+
+**Tip:** Use background agents for pre-commit reviews. Continue polishing code while reviewers run.
+See **`background-agents`** skill for patterns.
 
 ## Completion Signals
 
@@ -165,6 +183,10 @@ After `/clear`, say "check tasks" or "what tasks are pending":
 3. Resume work on first pending story
 
 ## Additional Resources
+
+### Related Skills
+
+- **`background-agents`** - Patterns for `run_in_background: true`, parallel reviewers, checking progress
 
 ### Reference Files
 

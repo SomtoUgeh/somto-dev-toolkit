@@ -77,17 +77,17 @@ Each iteration, you must:
 3. **Write ONE meaningful test** that validates real user behavior
 4. **Run lint, format, and typecheck** the equivalent command in the codebase to ensure code quality
 5. **Run coverage again** to verify improvement
-6. **[MANDATORY] Run reviewers IN PARALLEL** - In ONE message, spawn multiple Task calls:
+6. **[MANDATORY] Run reviewers IN PARALLEL (background optional)** - In ONE message, spawn multiple Task calls with `run_in_background: true`:
    ```
-   Task 1: subagent_type="pr-review-toolkit:code-simplifier" (max_turns: 15)
-   Task 2: subagent_type="<kieran-reviewer-for-language>" (max_turns: 20)
+   Task 1: subagent_type="pr-review-toolkit:code-simplifier" (max_turns: 15, run_in_background: true)
+   Task 2: subagent_type="<kieran-reviewer-for-language>" (max_turns: 20, run_in_background: true)
    ```
    Kieran reviewers:
    - TypeScript/JavaScript: `compound-engineering:review:kieran-typescript-reviewer`
    - Python: `compound-engineering:review:kieran-python-reviewer`
    - Database/migrations: `compound-engineering:review:data-integrity-guardian`
 
-   All run in parallel → results return together → address ALL findings.
+   Check progress: `/tasks` or `Ctrl+T`. Retrieve with `TaskOutput` → address ALL findings.
 7. **[MANDATORY] Output reviews marker** after addressing all findings:
    ```
    <reviews_complete/>
@@ -101,6 +101,22 @@ Each iteration, you must:
 **Hook handles automatically:** Logs to state.json (don't touch it)
 
 ⚠️ The stop hook ENFORCES steps 6-8. You cannot advance without `<reviews_complete/>` marker.
+
+## Commitment Protocol
+
+**Before each iteration, declare your completion criteria:**
+
+```
+"This iteration is complete when:
+- ONE test written that validates [specific user-facing behavior]
+- Test passes
+- Coverage improved for [target file]
+- Lint/typecheck pass
+- Reviewers addressed
+- Committed with test(<file>): message"
+```
+
+**Work until ALL declared criteria are verified.** Do not emit `<iteration_complete>` until you've checked each criterion.
 
 ## Quality Expectations
 

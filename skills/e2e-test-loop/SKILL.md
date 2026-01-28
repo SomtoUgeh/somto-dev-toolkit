@@ -49,8 +49,10 @@ Each iteration follows this sequence:
 3. **Write ONE test** - `*.e2e.ts` using page objects
 4. **Run linters** - Ensure code quality
 5. **Verify passing** - Run the E2E test
-6. **Run reviewers** - code-simplifier + kieran reviewer (MANDATORY)
+6. **Run reviewers** - code-simplifier + kieran reviewer with `run_in_background: true` (MANDATORY)
 7. **Commit** - `test(e2e): describe user flow`
+
+**Tip:** Background reviewers let you continue work while they run. See **`background-agents`** skill.
 
 ## File Naming Convention
 
@@ -118,6 +120,18 @@ await expect(page.getByText('Loaded')).toBeVisible()
 await page.waitForResponse('**/api/data')
 ```
 
+## Commitment Protocol
+
+Before each iteration, **declare completion criteria**:
+
+```
+"This iteration is complete when:
+- ONE E2E test validates [specific flow]
+- Page object created if needed
+- Test passes, reviewers addressed
+- Committed"
+```
+
 ## Quality Standards
 
 - **ONE test per iteration** - Focused, reviewable commits
@@ -165,6 +179,10 @@ Set `blockedBy` for dependent flows (checkout depends on login).
 ```
 
 ## Additional Resources
+
+### Related Skills
+
+- **`background-agents`** - Patterns for `run_in_background: true`, parallel reviewers
 
 ### Reference Files
 

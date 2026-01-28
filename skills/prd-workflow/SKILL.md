@@ -33,10 +33,13 @@ The PRD workflow progresses through six phases:
 |-------|------|---------|
 | 1 | Input Classification | Identify feature name and type |
 | 2 | Deep Interview | Gather requirements through questions |
-| 2.5 | Research | Parallel research (codebase, external, git history) |
+| 2.5 | Research | **Parallel background agents** (codebase, external, git history) |
 | 3 | Spec Write | Create comprehensive specification |
-| 3.5 | Review Gate | Parallel expert reviews |
+| 3.5 | Review Gate | **Parallel background reviewers** |
 | 4-6 | PRD Generation | Create atomic stories, prepare for implementation |
+
+**Key:** Phases 2.5 and 3.5 use `run_in_background: true` for non-blocking execution.
+See **`background-agents`** skill for patterns.
 
 ## Starting the Workflow
 
@@ -49,6 +52,8 @@ The PRD workflow progresses through six phases:
 ## Interview Philosophy
 
 **"Be annoyingly thorough."**
+
+**Commitment:** Before starting, declare: "I will ask 8-10+ questions covering: core problem, success criteria, MVP scope, technical constraints, UX flows, edge cases, error states, and tradeoffs."
 
 The interview phase asks 8-15 questions across multiple waves:
 
@@ -70,6 +75,8 @@ plans/auth-feature/
 ```
 
 ## Story Atomization Rules
+
+**Commitment:** "Each story will have ≤7 steps, touch ≤3 files, be independently testable, and have no 'and' in title."
 
 Each story must be completable in ONE iteration (~15-30 min):
 
@@ -96,6 +103,10 @@ The workflow ends with a choice:
 ```
 
 ## Additional Resources
+
+### Related Skills
+
+- **`background-agents`** - Patterns for `run_in_background: true`, checking progress, retrieving results
 
 ### Reference Files
 
