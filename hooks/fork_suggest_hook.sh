@@ -31,8 +31,11 @@ fi
 # Query qmd for similar sessions (keyword search - instant)
 RESULTS=$(qmd search "$PROMPT" --json -n 1 -c "$QMD_COLLECTION" 2>/dev/null) || exit 0
 
-# Check if we got results
-[[ -z "$RESULTS" || "$RESULTS" == "[]" || "$RESULTS" == "null" ]] && exit 0
+# Check if we got results (qmd returns "No results found." text when empty)
+[[ -z "$RESULTS" || "$RESULTS" == "[]" || "$RESULTS" == "null" || "$RESULTS" == "No results found." ]] && exit 0
+
+# Verify it's valid JSON before parsing
+echo "$RESULTS" | jq empty 2>/dev/null || exit 0
 
 # Parse result (qmd uses 'file' not 'path' for file location)
 TITLE=$(echo "$RESULTS" | jq -r '.[0].title // .[0].file // ""')

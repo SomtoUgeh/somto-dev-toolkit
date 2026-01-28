@@ -177,13 +177,25 @@ Ask user if they want background sync (recommended - syncs every 30 min):
 
 ### Step 10: Verify installation
 
+Run these verification commands one at a time:
+
 ```bash
-echo "=== Checking installation ===" && \
-ls -la ~/.claude/hooks/memory_injection.py && \
-ls -la ~/.claude/hooks/fork_suggest_hook.sh && \
-qmd status | grep claude-sessions && \
-(launchctl list 2>/dev/null | grep claude.session-sync || crontab -l 2>/dev/null | grep session-sync || echo "Scheduler: not installed")
+ls -la ~/.claude/hooks/memory_injection.py
 ```
+
+```bash
+ls -la ~/.claude/hooks/fork_suggest_hook.sh
+```
+
+```bash
+qmd status | grep claude-sessions
+```
+
+```bash
+launchctl list 2>/dev/null | grep claude.session-sync
+```
+
+(On Linux/WSL, use `crontab -l | grep session-sync` instead)
 
 ## After Installation
 
