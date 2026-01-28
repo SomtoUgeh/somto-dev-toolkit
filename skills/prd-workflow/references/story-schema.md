@@ -50,7 +50,7 @@ No separate progress.txt - the log is embedded in prd.json.
 | `skills` | string[] | For UI | Skills to load before implementing |
 | `steps` | string[] | Yes | 3-7 verification steps |
 | `passes` | boolean | Yes | Starts `false`, set `true` when done |
-| `priority` | integer | Yes | 1=first (foundation), higher=later (polish) |
+| `priority` | number | Yes | Use spacing of 10 (10, 20, 30...). Decimals for splits (10.1, 10.2). MUST be unique. |
 | `completed_at` | ISO8601/null | No | When story was completed |
 | `commit` | string/null | No | Commit hash for the story |
 
@@ -85,13 +85,46 @@ No separate progress.txt - the log is embedded in prd.json.
 | `commit` | string | Commit hash (for story_complete) |
 | `notes` | string | Optional notes |
 
-## Story Size Guidelines
+## Story Size Guidelines (HARD LIMITS)
 
 A well-sized story:
 - Completes in ~15-30 minutes
-- Has 3-7 verification steps
+- **MAX 7 verification steps** (ENFORCED - split if more)
 - Touches 1-3 files
 - Has no "and" in the title
+
+## Priority Rules (MANDATORY)
+
+**Spacing:** Use intervals of 10 (10, 20, 30...) to allow mid-loop insertions.
+
+**Uniqueness:** Every story MUST have a unique priority. Duplicates cause loop skipping.
+
+**Splitting mid-loop:** When splitting story N with priority P:
+- Replace story N with new stories using decimals: P, P+0.1, P+0.2...
+- Example: Story 5 (priority 50) split into 5a (50), 5b (50.1), 5c (50.2)
+
+### Good Priorities
+```json
+{"id": 1, "priority": 10},
+{"id": 2, "priority": 20},
+{"id": 3, "priority": 30}
+```
+
+### Bad Priorities (CAUSES BUGS)
+```json
+{"id": 1, "priority": 1},
+{"id": 2, "priority": 1},  // DUPLICATE - loop will skip one!
+{"id": 3, "priority": 2}
+```
+
+### Validation Command
+```bash
+# Run before starting /go loop
+jq -e '
+  ([.stories[].priority] | unique | length) == (.stories | length)
+  and ([.stories[] | select((.steps | length) > 7)] | length == 0)
+' prd.json && echo "✓ PRD valid" || echo "✗ PRD invalid"
+```
 
 ## Examples
 
