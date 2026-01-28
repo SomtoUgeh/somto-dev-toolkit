@@ -55,31 +55,46 @@ extract_summary() {
   grep -m1 '"type":"summary"' "$jsonl_file" 2>/dev/null | jq -r '.summary // empty' 2>/dev/null || echo ""
 }
 
-# Extract key actions from JSONL (tool_use entries)
+# Extract all user prompts from JSONL (the actual questions/requests)
+extract_user_prompts() {
+  local jsonl_file="$1"
+  # Get user messages where content is a string (direct prompts, not tool results)
+  # Filter out system reminders, compaction messages, and skill content
+  jq -r 'select(.type == "user" and .message.role == "user" and (.message.content | type == "string")) | .message.content' "$jsonl_file" 2>/dev/null | \
+    grep -v '^\[' | \
+    grep -v '^<' | \
+    grep -v '^Base directory for this skill' | \
+    grep -v '^#' | \
+    grep -v 'This session is being continued' | \
+    head -20
+}
+
+# Extract key actions from JSONL (tool_use entries in message.content)
 extract_key_actions() {
   local jsonl_file="$1"
-  local actions=""
 
-  # Extract Read tool uses
-  local reads
-  reads=$(grep '"tool_name":"Read"' "$jsonl_file" 2>/dev/null | \
-    jq -r '.tool_input.file_path // empty' 2>/dev/null | \
-    head -5 | sed 's/^/- Read: /' || echo "")
+  # Extract file paths from Read/Edit/Write tool uses
+  # Tool uses are in message.content array with type:tool_use
+  local file_actions
+  file_actions=$(jq -r '
+    select(.type == "assistant" and .message.content) |
+    .message.content[] |
+    select(.type == "tool_use") |
+    select(.name == "Read" or .name == "Edit" or .name == "Write") |
+    "- \(.name): \(.input.file_path // empty)"
+  ' "$jsonl_file" 2>/dev/null | grep -v ': $' | head -10 || echo "")
 
-  # Extract Edit/Write tool uses
-  local edits
-  edits=$(grep -E '"tool_name":"(Edit|Write)"' "$jsonl_file" 2>/dev/null | \
-    jq -r '.tool_input.file_path // empty' 2>/dev/null | \
-    head -5 | sed 's/^/- Edited: /' || echo "")
-
-  # Extract Bash commands (first word only for brevity)
+  # Extract Bash commands (just the command, truncated)
   local bash_cmds
-  bash_cmds=$(grep '"tool_name":"Bash"' "$jsonl_file" 2>/dev/null | \
-    jq -r '.tool_input.command // empty' 2>/dev/null | \
-    head -5 | cut -d' ' -f1 | sed 's/^/- Ran: /' || echo "")
+  bash_cmds=$(jq -r '
+    select(.type == "assistant" and .message.content) |
+    .message.content[] |
+    select(.type == "tool_use" and .name == "Bash") |
+    .input.command // empty
+  ' "$jsonl_file" 2>/dev/null | head -5 | cut -c1-60 | sed 's/^/- Ran: /' || echo "")
 
-  # Combine, remove empty lines, limit total
-  printf "%s\n%s\n%s" "$reads" "$edits" "$bash_cmds" | grep -v '^$' | head -10
+  # Combine
+  printf "%s\n%s" "$file_actions" "$bash_cmds" | grep -v '^$' | head -15
 }
 
 # Generate markdown for a single session
@@ -115,14 +130,22 @@ generate_session_markdown() {
   # Extract additional context from JSONL
   local summary=""
   local key_actions=""
+  local user_prompts=""
   if [[ -f "$full_path" ]]; then
     summary=$(extract_summary "$full_path")
     key_actions=$(extract_key_actions "$full_path")
+    user_prompts=$(extract_user_prompts "$full_path")
   fi
 
   # Format date for display
   local created_date
   created_date=$(echo "$created" | cut -dT -f1)
+
+  # Use summary as title if available and meaningful, else first prompt
+  local title="$first_prompt"
+  if [[ -n "$summary" && ${#summary} -gt 10 ]]; then
+    title="$summary"
+  fi
 
   # Generate markdown
   cat > "$output_file" << EOF
@@ -137,15 +160,14 @@ messages: $message_count
 full_path: $full_path
 ---
 
-# $first_prompt
+# $title
 
 EOF
 
-  # Add summary section if available
-  if [[ -n "$summary" ]]; then
+  # Add first prompt if different from title (for search context)
+  if [[ -n "$summary" && ${#summary} -gt 10 && "$first_prompt" != "$summary" ]]; then
     cat >> "$output_file" << EOF
-## Session Summary
-$summary
+**Initial request:** $first_prompt
 
 EOF
   fi
@@ -163,6 +185,15 @@ EOF
     cat >> "$output_file" << EOF
 ## Key Actions
 $key_actions
+
+EOF
+  fi
+
+  # Add user prompts for richer search context
+  if [[ -n "$user_prompts" ]]; then
+    cat >> "$output_file" << EOF
+## Conversation Highlights
+$user_prompts
 EOF
   fi
 
