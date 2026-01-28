@@ -110,6 +110,41 @@ SESSION_PATH=$(echo "$RESULTS" | jq -r '.[0].file // ""')
 
 Small things. Easy to miss. These are the corrections that only surface when you actually run the code.
 
+### Correction #4: BM25 Hates Long Queries
+
+After fixing the obvious bugs, something still wasn't working. The fork suggestion hook would find results with short queries but fail with longer prompts.
+
+```bash
+qmd search "gtm tracking" -c claude-sessions  # ✓ Returns results
+qmd search "I am looking for work on gtm tracking implementation" -c claude-sessions  # ✗ "No results found."
+```
+
+BM25 keyword search struggles with long queries. Too many words dilute the relevance scores. The important terms—"gtm," "tracking"—get drowned out by noise words.
+
+The fix: extract keywords before searching. Enter [YAKE](https://github.com/LIAAD/yake)—Yet Another Keyword Extractor. It's unsupervised, fast, and doesn't require loading any models.
+
+```python
+import yake
+
+def extract_keywords(text: str, max_keywords: int = 8) -> list[str]:
+    extractor = yake.KeywordExtractor(lan="en", n=2, top=max_keywords)
+    keywords = extractor.extract_keywords(text)
+    return [kw for kw, score in keywords]
+```
+
+Now the long prompt becomes focused keywords:
+
+```
+"I am looking for work on gtm tracking implementation"
+  → "gtm tracking implementation"
+```
+
+And the search works.
+
+The thinking blocks Claude generates are even longer—paragraphs of reasoning about the problem. Feeding that directly to BM25 was doomed. With YAKE extracting the key terms first, the memory injection hook finally finds relevant past sessions.
+
+One more thing: YAKE is optional. The hook falls back to simple word extraction (remove stopwords, take the most frequent) if YAKE isn't installed. Graceful degradation.
+
 ## What Gets Extracted
 
 Here's where it gets interesting. The raw JSONL contains everything—but most of it is noise. Tool results, system reminders, skill content. We need the signal.
@@ -179,7 +214,7 @@ Claude Code plugins can define hooks that fire at specific points:
     "UserPromptSubmit": [
       {
         "hooks": [{
-          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/fork_suggest_hook.sh",
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/fork_suggest_hook.py",
           "timeout": 8
         }]
       }
@@ -256,7 +291,7 @@ has a timeout setting that's too small for this request...
 
 The fork suggestion actually works:
 ```bash
-echo '{"prompt":"fix timeout issue with API endpoint"}' | ./hooks/fork_suggest_hook.sh
+echo '{"prompt":"fix timeout issue with API endpoint"}' | python3 ./hooks/fork_suggest_hook.py
 ```
 
 ```json
@@ -278,14 +313,16 @@ Learning compounds when you remember.
 If you want to try this yourself:
 
 1. Install qmd: `bun install -g https://github.com/tobi/qmd`
-2. Install the plugin or copy the hooks to `~/.claude/hooks/`
-3. Run `/setup-memory` to initialize the collection and scheduler
-4. Start working. Context surfaces automatically.
+2. Install YAKE (optional but recommended): `pip install yake`
+3. Install the plugin or copy the hooks to `~/.claude/hooks/`
+4. Run `/setup-memory` to initialize the collection and scheduler
+5. Start working. Context surfaces automatically.
 
 The code lives in [somto-dev-toolkit](https://github.com/somto-dev-toolkit). The key files:
 
 - `hooks/memory_injection.py` — PreToolUse context injection
-- `hooks/fork_suggest_hook.sh` — Session fork suggestions
+- `hooks/fork_suggest_hook.py` — Session fork suggestions
+- `hooks/keyword_extractor.py` — YAKE keyword extraction (with fallback)
 - `scripts/sync-sessions-to-qmd.sh` — Session extraction pipeline
 - `scripts/setup-scheduled-sync.sh` — Cross-platform scheduler setup
 
