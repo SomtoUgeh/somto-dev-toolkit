@@ -12,12 +12,21 @@ You are helping the user install the Smart Session Memory system. This enables:
 - Fork suggestions when starting sessions similar to past work
 - Background indexing of sessions every 30 minutes
 
+## Do You Need This?
+
+**If the plugin is already enabled**: The memory hooks are already active via the plugin's `hooks.json`. You only need this setup for:
+1. Setting up **qmd** (required for memory to work)
+2. Running **initial sync** of your sessions
+3. Setting up **scheduled sync** (every 30 min)
+
+**If you want hooks without the plugin**: This installs hooks to `~/.claude/settings.json` so they work independently.
+
 ## Installation Scope
 
 The user wants to install at: **$ARGUMENTS** scope (default: user)
 
-- **user**: Installs to `~/.claude/` - applies to ALL Claude Code sessions (recommended)
-- **plugin**: Hooks stay in plugin only - requires plugin to be installed
+- **user**: Installs hooks to `~/.claude/` - works without plugin loaded (recommended for persistence)
+- **plugin-only**: Skip hook installation, just setup qmd + sync (hooks stay in plugin)
 
 ## Prerequisites Check
 
@@ -66,44 +75,69 @@ chmod +x ~/.claude/hooks/fork_suggest_hook.sh
 
 ### Step 4: Configure hooks in settings.json
 
-Read existing `~/.claude/settings.json` if it exists, then merge the hook config.
+**Important**: The plugin's hooks are already active if the plugin is enabled. This step is for users who want hooks to work **without the plugin loaded**.
 
-The hooks to add:
+Read existing `~/.claude/settings.json`, then **MERGE** (not replace) the hook config.
 
+**Hook entries to ADD (append to existing arrays):**
+
+For `hooks.PreToolUse` array, append:
+```json
+{
+  "matcher": "Read|Edit|Write|Glob|Grep",
+  "hooks": [
+    {
+      "type": "command",
+      "command": "python3 ~/.claude/hooks/memory_injection.py",
+      "timeout": 10
+    }
+  ]
+}
+```
+
+For `hooks.UserPromptSubmit` array, append:
+```json
+{
+  "hooks": [
+    {
+      "type": "command",
+      "command": "~/.claude/hooks/fork_suggest_hook.sh",
+      "timeout": 8
+    }
+  ]
+}
+```
+
+**Merge rules:**
+1. Read existing `~/.claude/settings.json` first
+2. If `hooks` key doesn't exist, create it
+3. If `hooks.PreToolUse` exists, **append** the new entry to the array
+4. If `hooks.UserPromptSubmit` exists, **append** the new entry to the array
+5. **Never delete or replace** existing hook entries
+6. Preserve all other settings (permissions, model, statusLine, etc.)
+
+**Example merge** - if user already has:
 ```json
 {
   "hooks": {
     "PreToolUse": [
-      {
-        "matcher": "Read|Edit|Write|Glob|Grep",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.claude/hooks/memory_injection.py",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/fork_suggest_hook.sh",
-            "timeout": 8
-          }
-        ]
-      }
+      {"matcher": "Bash", "hooks": [{"command": "python3 ~/.claude/hooks/git_guard.py"}]}
     ]
   }
 }
 ```
 
-**Important:**
-- If hooks.PreToolUse already exists, append to the array don't replace
-- If hooks.UserPromptSubmit already exists, append to the array don't replace
-- Preserve all existing settings
+After merge should be:
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"command": "python3 ~/.claude/hooks/git_guard.py"}]},
+      {"matcher": "Read|Edit|Write|Glob|Grep", "hooks": [{"command": "python3 ~/.claude/hooks/memory_injection.py", "timeout": 10}]}
+    ]
+  }
+}
+```
 
 ### Step 5: Run initial session sync
 
