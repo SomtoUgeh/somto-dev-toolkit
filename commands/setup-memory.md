@@ -30,7 +30,7 @@ The user wants to install at: **$ARGUMENTS** scope (default: user)
 
 ## Prerequisites Check
 
-### Step 1: Check qmd installation
+### Step 1a: Check qmd installation
 
 ```bash
 qmd --version
@@ -50,6 +50,21 @@ Run /setup-memory again after installing qmd.
 
 Then STOP and wait for them to install.
 
+### Step 1b: Install Python dependencies (optional but recommended)
+
+For better keyword extraction using YAKE:
+
+```bash
+cd "${CLAUDE_PLUGIN_ROOT}" && uv pip install yake
+```
+
+Or without uv:
+```bash
+pip install yake
+```
+
+**Note**: Hooks work without YAKE installed - they fall back to simple word extraction.
+
 ## Installation Steps
 
 ### Step 2: Create directories
@@ -61,6 +76,12 @@ mkdir -p ~/.claude/qmd-sessions
 
 ### Step 3: Copy hook scripts
 
+Copy the keyword extractor (shared):
+```bash
+cp "${CLAUDE_PLUGIN_ROOT}/hooks/keyword_extractor.py" ~/.claude/hooks/keyword_extractor.py
+chmod +x ~/.claude/hooks/keyword_extractor.py
+```
+
 Copy the memory injection hook:
 ```bash
 cp "${CLAUDE_PLUGIN_ROOT}/hooks/memory_injection.py" ~/.claude/hooks/memory_injection.py
@@ -69,8 +90,8 @@ chmod +x ~/.claude/hooks/memory_injection.py
 
 Copy the fork suggestion hook:
 ```bash
-cp "${CLAUDE_PLUGIN_ROOT}/hooks/fork_suggest_hook.sh" ~/.claude/hooks/fork_suggest_hook.sh
-chmod +x ~/.claude/hooks/fork_suggest_hook.sh
+cp "${CLAUDE_PLUGIN_ROOT}/hooks/fork_suggest_hook.py" ~/.claude/hooks/fork_suggest_hook.py
+chmod +x ~/.claude/hooks/fork_suggest_hook.py
 ```
 
 ### Step 4: Configure hooks in settings.json
@@ -101,7 +122,7 @@ For `hooks.UserPromptSubmit` array, append:
   "hooks": [
     {
       "type": "command",
-      "command": "~/.claude/hooks/fork_suggest_hook.sh",
+      "command": "python3 ~/.claude/hooks/fork_suggest_hook.py",
       "timeout": 8
     }
   ]
@@ -184,7 +205,7 @@ ls -la ~/.claude/hooks/memory_injection.py
 ```
 
 ```bash
-ls -la ~/.claude/hooks/fork_suggest_hook.sh
+ls -la ~/.claude/hooks/fork_suggest_hook.py
 ```
 
 ```bash
@@ -227,7 +248,7 @@ crontab -l | grep session     # Linux
 
 **Fork suggestion not appearing?**
 - Only shows for prompts >20 chars with similar past sessions
-- Test: `echo '{"prompt":"fix timeout issue with API"}' | ~/.claude/hooks/fork_suggest_hook.sh`
+- Test: `echo '{"prompt":"fix timeout issue with API"}' | ~/.claude/hooks/fork_suggest_hook.py`
 
 **Scheduler not running?**
 - macOS: `launchctl list | grep claude`
@@ -245,7 +266,7 @@ crontab -l | grep session     # Linux
 
 # Remove hook scripts
 rm ~/.claude/hooks/memory_injection.py
-rm ~/.claude/hooks/fork_suggest_hook.sh
+rm ~/.claude/hooks/fork_suggest_hook.py
 
 # Optionally remove indexed sessions
 rm -rf ~/.claude/qmd-sessions/

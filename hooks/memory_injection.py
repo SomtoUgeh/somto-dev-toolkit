@@ -3,7 +3,7 @@
 Memory Injection Hook - Injects relevant past session context before tool use.
 
 Triggered on PreToolUse for: Read, Edit, Write, Glob, Grep
-Queries qmd semantic search, injects high-relevance memories as additionalContext.
+Queries qmd keyword search with YAKE-extracted keywords for focused results.
 
 Exit codes:
 - 0: Always (never block tool use)
@@ -17,6 +17,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+from keyword_extractor import extract_keywords, keywords_to_query
 
 # Configuration
 MAX_RESULTS = 3
@@ -128,18 +130,25 @@ def add_shown_memories(session_id: str, doc_ids: list[str]) -> None:
 
 
 def query_qmd(thinking: str) -> list[dict]:
-    """Query qmd search (keyword) with timeout. Returns list of results.
+    """Query qmd search with YAKE-extracted keywords.
 
     Uses 'search' (BM25 keyword) instead of 'vsearch' (semantic) because:
     - search is instant, vsearch needs ~1 min model load on first use
     - Real-time hooks need <5s response time
+
+    YAKE extracts focused keywords from thinking to improve BM25 matching.
+    Long text dilutes BM25 relevance - keywords fix this.
     """
+    # Extract keywords for focused BM25 search
+    keywords = extract_keywords(thinking, max_keywords=8)
+    query = keywords_to_query(keywords) if keywords else thinking[:200]
+
     try:
         result = subprocess.run(
             [
                 "qmd",
                 "search",
-                thinking,
+                query,
                 "--json",
                 "-n",
                 str(MAX_RESULTS + 2),  # Get extra for dedup
@@ -153,7 +162,12 @@ def query_qmd(thinking: str) -> list[dict]:
         if result.returncode != 0:
             return []
 
-        results = json.loads(result.stdout)
+        # Handle "No results found." text response
+        stdout = result.stdout.strip()
+        if not stdout or stdout == "No results found.":
+            return []
+
+        results = json.loads(stdout)
         return results if isinstance(results, list) else []
     except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
         return []

@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/fork_suggest_hook.sh",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/fork_suggest_hook.py",
             "timeout": 8
           }
         ]

@@ -1,0 +1,20 @@
+[project]
+name = "somto-dev-toolkit-hooks"
+version = "0.1.0"
+description = "Python hooks for somto-dev-toolkit Claude Code plugin"
+requires-python = ">=3.10"
+dependencies = [
+    "yake>=0.4.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hooks"]
