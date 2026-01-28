@@ -60,13 +60,46 @@ extract_user_prompts() {
   local jsonl_file="$1"
   # Get user messages where content is a string (direct prompts, not tool results)
   # Filter out system reminders, compaction messages, and skill content
+  # Use awk to limit lines instead of head (avoids SIGPIPE with pipefail)
   jq -r 'select(.type == "user" and .message.role == "user" and (.message.content | type == "string")) | .message.content' "$jsonl_file" 2>/dev/null | \
     grep -v '^\[' | \
     grep -v '^<' | \
     grep -v '^Base directory for this skill' | \
     grep -v '^#' | \
     grep -v 'This session is being continued' | \
-    head -20
+    grep -v '^Analysis:' | \
+    awk 'NR<=20'
+}
+
+# Extract assistant text responses (explanations, plans, insights)
+extract_assistant_insights() {
+  local jsonl_file="$1"
+  # Get text blocks from assistant messages (not tool_use blocks)
+  # Use awk to limit lines instead of head (avoids SIGPIPE with pipefail)
+  jq -r '
+    select(.type == "assistant" and .message.content) |
+    .message.content[] |
+    select(.type == "text") |
+    .text // empty
+  ' "$jsonl_file" 2>/dev/null | \
+    grep -v '^\[' | \
+    grep -v '^<' | \
+    grep -v '^🏁' | \
+    awk 'NR<=30 {print substr($0,1,500)}'
+}
+
+# Extract thinking blocks (problem analysis, reasoning, plans)
+extract_thinking() {
+  local jsonl_file="$1"
+  # Get thinking blocks - these contain valuable reasoning
+  # Use awk to limit instead of head (avoids SIGPIPE with pipefail)
+  jq -r '
+    select(.type == "assistant" and .message.content) |
+    .message.content[] |
+    select(.type == "thinking") |
+    .thinking // empty
+  ' "$jsonl_file" 2>/dev/null | \
+    awk 'NR<=50 {print substr($0,1,2000)}'
 }
 
 # Extract key actions from JSONL (tool_use entries in message.content)
@@ -75,6 +108,7 @@ extract_key_actions() {
 
   # Extract file paths from Read/Edit/Write tool uses
   # Tool uses are in message.content array with type:tool_use
+  # Use awk to limit instead of head (avoids SIGPIPE with pipefail)
   local file_actions
   file_actions=$(jq -r '
     select(.type == "assistant" and .message.content) |
@@ -82,7 +116,7 @@ extract_key_actions() {
     select(.type == "tool_use") |
     select(.name == "Read" or .name == "Edit" or .name == "Write") |
     "- \(.name): \(.input.file_path // empty)"
-  ' "$jsonl_file" 2>/dev/null | grep -v ': $' | head -10 || echo "")
+  ' "$jsonl_file" 2>/dev/null | grep -v ': $' | awk 'NR<=10' || echo "")
 
   # Extract Bash commands (just the command, truncated)
   local bash_cmds
@@ -91,10 +125,10 @@ extract_key_actions() {
     .message.content[] |
     select(.type == "tool_use" and .name == "Bash") |
     .input.command // empty
-  ' "$jsonl_file" 2>/dev/null | head -5 | cut -c1-60 | sed 's/^/- Ran: /' || echo "")
+  ' "$jsonl_file" 2>/dev/null | awk 'NR<=5 {print "- Ran: " substr($0,1,60)}' || echo "")
 
   # Combine
-  printf "%s\n%s" "$file_actions" "$bash_cmds" | grep -v '^$' | head -15
+  printf "%s\n%s" "$file_actions" "$bash_cmds" | grep -v '^$' | awk 'NR<=15'
 }
 
 # Generate markdown for a single session
@@ -131,10 +165,14 @@ generate_session_markdown() {
   local summary=""
   local key_actions=""
   local user_prompts=""
+  local assistant_insights=""
+  local thinking=""
   if [[ -f "$full_path" ]]; then
     summary=$(extract_summary "$full_path")
     key_actions=$(extract_key_actions "$full_path")
     user_prompts=$(extract_user_prompts "$full_path")
+    assistant_insights=$(extract_assistant_insights "$full_path")
+    thinking=$(extract_thinking "$full_path")
   fi
 
   # Format date for display
@@ -194,6 +232,24 @@ EOF
     cat >> "$output_file" << EOF
 ## Conversation Highlights
 $user_prompts
+
+EOF
+  fi
+
+  # Add assistant insights (explanations, solutions)
+  if [[ -n "$assistant_insights" ]]; then
+    cat >> "$output_file" << EOF
+## Key Insights
+$assistant_insights
+
+EOF
+  fi
+
+  # Add thinking (reasoning, problem analysis, plans)
+  if [[ -n "$thinking" ]]; then
+    cat >> "$output_file" << EOF
+## Problem Analysis
+$thinking
 EOF
   fi
 
