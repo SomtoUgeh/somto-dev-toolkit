@@ -3,12 +3,15 @@
 #
 # Usage:
 #   ./sync-sessions-to-qmd.sh [--full]
-#   ./sync-sessions-to-qmd.sh --single <session_file> <session_id> <project_path>
+#   ./sync-sessions-to-qmd.sh --single <session_file> <session_id> <project_path> [--no-embed]
 #
 # Modes:
 #   (default)  Incremental - skip sessions where markdown is newer than source
 #   --full     Rebuild all session markdown files
 #   --single   Index a single session (used by stop hook)
+#
+# Options:
+#   --no-embed  Skip qmd embed step (used by PreCompact hook to stay under timeout)
 
 set -euo pipefail
 
@@ -20,6 +23,7 @@ MODE="incremental"
 SINGLE_FILE=""
 SINGLE_ID=""
 SINGLE_PROJECT=""
+SKIP_EMBED=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -33,6 +37,10 @@ while [[ $# -gt 0 ]]; do
       SINGLE_ID="$3"
       SINGLE_PROJECT="$4"
       shift 4
+      ;;
+    --no-embed)
+      SKIP_EMBED=true
+      shift
       ;;
     *)
       echo "Unknown option: $1" >&2
@@ -281,8 +289,8 @@ process_single_session() {
       generate_session_markdown "$SINGLE_ID" "$SINGLE_FILE" "$first_prompt" \
         "$message_count" "$created" "$modified" "$git_branch" "$SINGLE_PROJECT"
 
-      # Re-embed just this document (if qmd is available)
-      if command -v qmd &>/dev/null; then
+      # Re-embed just this document (if qmd is available and not skipped)
+      if [[ "$SKIP_EMBED" == false ]] && command -v qmd &>/dev/null; then
         qmd embed 2>/dev/null || true
       fi
       return 0

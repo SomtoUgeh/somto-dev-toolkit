@@ -73,7 +73,8 @@ def query_qmd(prompt: str, num_results: int = MAX_RESULTS) -> list[dict]:
         stdout = result.stdout.strip()
         if not stdout or stdout == "No results found.":
             return []
-        return json.loads(stdout)
+        results = json.loads(stdout)
+        return results if isinstance(results, list) else []
     except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
         return []
 
@@ -108,9 +109,12 @@ To fork: claude --resume {session_id} --fork-session""")
     if len(memories) > 1:
         parts.append("\n📚 ADDITIONAL RELEVANT SESSIONS:")
         for mem in memories[1:MAX_RESULTS + 1]:
-            title = mem.get("title", mem.get("path", ""))
+            mem_file = mem.get("file", mem.get("path", ""))
+            title = mem.get("title", mem_file)
             snippet = mem.get("snippet", "")[:200].replace("\n", " ")
-            doc_id = mem.get("id", mem.get("path", ""))
+            doc_id = mem.get("id", mem_file)
+            if not title:
+                continue
             parts.append(f"\n• {title}")
             if snippet:
                 parts.append(f"  {snippet}...")

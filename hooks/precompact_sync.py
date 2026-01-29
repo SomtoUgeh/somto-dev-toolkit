@@ -36,18 +36,17 @@ def main():
     if not os.path.exists(sync_script):
         sys.exit(0)
 
-    # Run sync for this session only
+    # Run sync for this session only (--no-embed to stay under timeout)
     try:
         subprocess.run(
-            [sync_script, "--single", transcript_path, session_id, project_dir],
+            [sync_script, "--single", transcript_path, session_id, project_dir, "--no-embed"],
             capture_output=True,
             timeout=30.0,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
         pass  # Best effort - don't block compaction
 
-    # NOTE: Skip qmd embed here - takes 60s+ and hook timeout is 60s
-    # Scheduled sync (cron/launchd) handles embedding every 30 min
+    # NOTE: --no-embed flag skips qmd embed (60s+) - scheduled sync handles embedding
 
     sys.exit(0)
 

@@ -102,10 +102,10 @@ cp "${CLAUDE_PLUGIN_ROOT}/hooks/memory_injection.py" ~/.claude/hooks/memory_inje
 chmod +x ~/.claude/hooks/memory_injection.py
 ```
 
-Copy the fork suggestion hook:
+Copy the prompt context hook (fork suggestions + memory):
 ```bash
-cp "${CLAUDE_PLUGIN_ROOT}/hooks/fork_suggest_hook.py" ~/.claude/hooks/fork_suggest_hook.py
-chmod +x ~/.claude/hooks/fork_suggest_hook.py
+cp "${CLAUDE_PLUGIN_ROOT}/hooks/prompt_context.py" ~/.claude/hooks/prompt_context.py
+chmod +x ~/.claude/hooks/prompt_context.py
 ```
 
 ### Step 4: Configure hooks in settings.json
@@ -136,8 +136,8 @@ For `hooks.UserPromptSubmit` array, append:
   "hooks": [
     {
       "type": "command",
-      "command": "python3 ~/.claude/hooks/fork_suggest_hook.py",
-      "timeout": 8
+      "command": "python3 ~/.claude/hooks/prompt_context.py",
+      "timeout": 10
     }
   ]
 }
@@ -219,7 +219,7 @@ ls -la ~/.claude/hooks/memory_injection.py
 ```
 
 ```bash
-ls -la ~/.claude/hooks/fork_suggest_hook.py
+ls -la ~/.claude/hooks/prompt_context.py
 ```
 
 ```bash
@@ -262,7 +262,7 @@ crontab -l | grep session     # Linux
 
 **Fork suggestion not appearing?**
 - Only shows for prompts >20 chars with similar past sessions
-- Test: `echo '{"prompt":"fix timeout issue with API"}' | ~/.claude/hooks/fork_suggest_hook.py`
+- Test: `echo '{"prompt":"fix timeout issue with API"}' | python3 ~/.claude/hooks/prompt_context.py`
 
 **Scheduler not running?**
 - macOS: `launchctl list | grep claude`
@@ -280,7 +280,7 @@ crontab -l | grep session     # Linux
 
 # Remove hook scripts
 rm ~/.claude/hooks/memory_injection.py
-rm ~/.claude/hooks/fork_suggest_hook.py
+rm ~/.claude/hooks/prompt_context.py
 
 # Optionally remove indexed sessions
 rm -rf ~/.claude/qmd-sessions/
