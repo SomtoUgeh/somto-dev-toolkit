@@ -134,7 +134,8 @@ extract_key_actions() {
 # Generate markdown for a single session
 generate_session_markdown() {
   local session_id="$1"
-  local full_path="$2"
+  local full_path="${2:-}"
+  [[ -z "$full_path" ]] && return 0
   local first_prompt="$3"
   local message_count="$4"
   local created="$5"
@@ -152,7 +153,7 @@ generate_session_markdown() {
   local output_file="$project_output_dir/${session_id}.md"
 
   # Check if we should skip (incremental mode)
-  if [[ "$MODE" == "incremental" && -f "$output_file" ]]; then
+  if [[ "$MODE" == "incremental" && -f "$output_file" && -n "${full_path:-}" ]]; then
     local md_mtime jsonl_mtime
     md_mtime=$(stat -f %m "$output_file" 2>/dev/null || stat -c %Y "$output_file" 2>/dev/null || echo 0)
     jsonl_mtime=$(stat -f %m "$full_path" 2>/dev/null || stat -c %Y "$full_path" 2>/dev/null || echo 0)

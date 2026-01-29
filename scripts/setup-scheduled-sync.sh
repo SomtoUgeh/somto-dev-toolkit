@@ -86,12 +86,16 @@ EOF
 
 install_cron() {
     # Build PATH that includes common qmd install locations for Linux/WSL
-    local path_value="$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+    local path_value="$HOME/.bun/bin:$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
     local cron_cmd="*/30 * * * * PATH=$path_value $SYNC_SCRIPT >> $HOME/.claude/session-sync.log 2>&1"
     local cron_marker="# claude-session-sync"
 
-    # Remove existing entry and add new one
-    (crontab -l 2>/dev/null | grep -v "session-sync"; echo "$cron_cmd $cron_marker") | crontab -
+    # Use temp file for reliable cron installation (pipe approach unreliable on some systems)
+    local tmp_cron="/tmp/claude-cron-$$"
+    crontab -l 2>/dev/null | grep -v "session-sync" > "$tmp_cron" || true
+    echo "$cron_cmd $cron_marker" >> "$tmp_cron"
+    crontab "$tmp_cron"
+    rm -f "$tmp_cron"
 
     echo "✓ Installed cron scheduler"
     echo "  Schedule: Every 30 minutes"

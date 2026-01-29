@@ -58,11 +58,16 @@ YAKE improves session search by extracting meaningful keywords. Auto-install (be
 # Check if already installed
 if python3 -c "import yake" 2>/dev/null; then
     echo "YAKE already installed ✓"
+elif ! command -v pip3 &>/dev/null; then
+    echo "pip3 not found. Install with:"
+    echo "  Ubuntu/Debian: sudo apt install python3-pip"
+    echo "  macOS: brew install python3"
+    echo ""
+    echo "Skipping YAKE (fallback mode will be used)"
 else
-    # Try pip3 with --break-system-packages (works on modern macOS/Linux)
-    pip3 install --user --break-system-packages yake 2>/dev/null || \
+    # Try --user first (works most places), then --break-system-packages if needed
     pip3 install --user yake 2>/dev/null || \
-    pip install --user yake 2>/dev/null || \
+    pip3 install --user --break-system-packages yake 2>/dev/null || \
     echo "YAKE install failed (fallback mode will be used)"
 fi
 ```
