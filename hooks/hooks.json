@@ -61,8 +61,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/fork_suggest_hook.py",
-            "timeout": 8
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/prompt_context.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/precompact_sync.py",
+            "timeout": 45
           }
         ]
       }

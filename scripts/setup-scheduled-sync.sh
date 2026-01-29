@@ -39,7 +39,7 @@ install_launchd() {
 
     # Get PATH for qmd (include common locations for macOS)
     local path_value
-    path_value="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+    path_value="$HOME/.bun/bin:$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
     # Write plist
     cat > "$plist_path" << EOF

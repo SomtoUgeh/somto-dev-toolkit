@@ -33,6 +33,11 @@ def get_session_id() -> str:
     return os.environ.get("CLAUDE_SESSION_ID", "unknown")
 
 
+def sanitize_session_id(session_id: str) -> str:
+    """Sanitize session ID for use in file paths."""
+    return session_id.replace("/", "-").replace("\\", "-")
+
+
 def get_transcript_path() -> str | None:
     """Get transcript path from environment."""
     return os.environ.get("CLAUDE_TRANSCRIPT_PATH")
@@ -78,12 +83,12 @@ def extract_last_thinking(transcript_path: str) -> str:
 
 def get_hash_path(session_id: str) -> Path:
     """Get path for query hash dedup file."""
-    return Path(f"/tmp/{session_id}_memory_hash")
+    return Path(f"/tmp/{sanitize_session_id(session_id)}_memory_hash")
 
 
 def get_shown_path(session_id: str) -> Path:
-    """Get path for shown memories dedup file."""
-    return Path(f"/tmp/{session_id}_shown_memories")
+    """Get path for shown memories dedup file (shared with prompt_context.py)."""
+    return Path(f"/tmp/{sanitize_session_id(session_id)}_shown_memories")
 
 
 def should_skip_query(session_id: str, thinking: str) -> bool:
