@@ -33,7 +33,7 @@ The user wants to install at: **$ARGUMENTS** scope (default: user)
 ### Step 1a: Check qmd installation
 
 ```bash
-qmd --version
+command -v qmd && qmd status
 ```
 
 If qmd not found, tell user:
