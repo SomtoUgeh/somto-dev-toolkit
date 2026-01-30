@@ -163,8 +163,8 @@ generate_session_markdown() {
   # Check if we should skip (incremental mode)
   if [[ "$MODE" == "incremental" && -f "$output_file" && -n "${full_path:-}" ]]; then
     local md_mtime jsonl_mtime
-    md_mtime=$(stat -f %m "$output_file" 2>/dev/null || stat -c %Y "$output_file" 2>/dev/null || echo 0)
-    jsonl_mtime=$(stat -f %m "$full_path" 2>/dev/null || stat -c %Y "$full_path" 2>/dev/null || echo 0)
+    md_mtime=$(stat -f %m "$output_file" 2>/dev/null || stat --format=%Y "$output_file" 2>/dev/null || echo 0)
+    jsonl_mtime=$(stat -f %m "$full_path" 2>/dev/null || stat --format=%Y "$full_path" 2>/dev/null || echo 0)
     if [[ "$md_mtime" -gt "$jsonl_mtime" ]]; then
       return 0  # Skip - markdown is newer
     fi
