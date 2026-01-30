@@ -133,11 +133,14 @@ install_cron() {
             echo "  Setting up passwordless sudo for cron..."
             echo "  (You may be prompted for your password once)"
             echo ""
+            # Ensure sudoers.d directory exists
+            sudo mkdir -p /etc/sudoers.d 2>/dev/null
             if echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/service cron start" | sudo tee "$sudoers_file" >/dev/null 2>&1; then
                 sudo chmod 440 "$sudoers_file" 2>/dev/null
                 echo "  ✓ Passwordless sudo configured"
             else
                 echo "  ⚠️  Could not configure passwordless sudo. Run manually:"
+                echo "    sudo mkdir -p /etc/sudoers.d"
                 echo "    echo \"\$USER ALL=(ALL) NOPASSWD: /usr/sbin/service cron start\" | sudo tee $sudoers_file"
                 echo "    sudo chmod 440 $sudoers_file"
             fi

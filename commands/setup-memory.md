@@ -286,6 +286,7 @@ pgrep -x cron || echo "Cron not running"
 sudo service cron start
 
 # Setup passwordless sudo for auto-start
+sudo mkdir -p /etc/sudoers.d
 echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/service cron start" | sudo tee /etc/sudoers.d/cron-nopasswd
 sudo chmod 440 /etc/sudoers.d/cron-nopasswd
 
