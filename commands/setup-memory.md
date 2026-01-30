@@ -258,7 +258,11 @@ crontab -l | grep session     # Linux
 **No context injected?**
 - Check qmd has the collection: `qmd status`
 - Check sessions synced: `ls ~/.claude/qmd-sessions/`
-- Re-sync: `~/.claude/plugins/somto-dev-toolkit/scripts/sync-sessions-to-qmd.sh --full`
+- Re-sync and re-index:
+  ```bash
+  ~/.claude/plugins/somto-dev-toolkit/scripts/sync-sessions-to-qmd.sh --full
+  qmd update && qmd embed
+  ```
 
 **Fork suggestion not appearing?**
 - Only shows for prompts >20 chars with similar past sessions
