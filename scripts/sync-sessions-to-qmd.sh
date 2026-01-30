@@ -54,7 +54,29 @@ mkdir -p "$OUTPUT_DIR"
 
 # Extract project name from path (e.g., /Users/somto/code/my-project -> my-project)
 get_project_name() {
-  basename "$1"
+  local path="$1"
+  if [[ -z "$path" || "$path" == "." ]]; then
+    echo "unknown-project"
+  else
+    # Use -- to prevent paths starting with - being treated as options
+    basename -- "$path"
+  fi
+}
+
+# Escape a value for YAML (quote if contains special chars)
+yaml_escape() {
+  local val="$1"
+  # Quote if contains YAML special chars or starts with - or >
+  # Use case pattern matching to avoid regex escaping issues
+  case "$val" in
+    *:*|*\#*|*\[*|*\]*|*\{*|*\}*|*,*|*\&*|*\**|*\!*|*\|*|*\'*|*\"*|*%*|*@*|-*|\>*)
+      # Escape double quotes and wrap in double quotes
+      printf '"%s"' "${val//\"/\\\"}"
+      ;;
+    *)
+      printf '%s' "$val"
+      ;;
+  esac
 }
 
 # Get numeric mtime in a cross-platform way (Linux/WSL vs macOS BSD stat).
@@ -90,32 +112,36 @@ extract_user_prompts() {
   local jsonl_file="$1"
   # Get user messages where content is a string (direct prompts, not tool results)
   # Filter out system reminders, compaction messages, and skill content
-  # Use awk to limit lines instead of head (avoids SIGPIPE with pipefail)
+  # Use awk for filtering to avoid grep -v exit 1 on no matches (pipefail issue)
   jq -r 'select(.type == "user" and .message.role == "user" and (.message.content | type == "string")) | .message.content' "$jsonl_file" 2>/dev/null | \
-    grep -v '^\[' | \
-    grep -v '^<' | \
-    grep -v '^Base directory for this skill' | \
-    grep -v '^#' | \
-    grep -v 'This session is being continued' | \
-    grep -v '^Analysis:' | \
-    awk 'NR<=20'
+    awk '
+      /^\[/ { next }
+      /^</ { next }
+      /^Base directory for this skill/ { next }
+      /^#/ { next }
+      /This session is being continued/ { next }
+      /^Analysis:/ { next }
+      NR <= 20 { print }
+    '
 }
 
 # Extract assistant text responses (explanations, plans, insights)
 extract_assistant_insights() {
   local jsonl_file="$1"
   # Get text blocks from assistant messages (not tool_use blocks)
-  # Use awk to limit lines instead of head (avoids SIGPIPE with pipefail)
+  # Use awk for filtering to avoid grep -v exit 1 on no matches (pipefail issue)
   jq -r '
     select(.type == "assistant" and .message.content) |
     .message.content[] |
     select(.type == "text") |
     .text // empty
   ' "$jsonl_file" 2>/dev/null | \
-    grep -v '^\[' | \
-    grep -v '^<' | \
-    grep -v '^🏁' | \
-    awk 'NR<=30 {print substr($0,1,500)}'
+    awk '
+      /^\[/ { next }
+      /^</ { next }
+      /^🏁/ { next }
+      NR <= 30 { print substr($0,1,500) }
+    '
 }
 
 # Extract thinking blocks (problem analysis, reasoning, plans)
@@ -216,17 +242,22 @@ generate_session_markdown() {
     title="$summary"
   fi
 
-  # Generate markdown
+  # Generate markdown with YAML-safe values
+  local yaml_project_path yaml_full_path yaml_branch
+  yaml_project_path=$(yaml_escape "$project_path")
+  yaml_full_path=$(yaml_escape "$full_path")
+  yaml_branch=$(yaml_escape "$git_branch")
+
   cat > "$output_file" << EOF
 ---
 session_id: $session_id
-project_path: $project_path
+project_path: $yaml_project_path
 project_name: $project_name
-branch: $git_branch
+branch: $yaml_branch
 created: $created
 modified: $modified
 messages: $message_count
-full_path: $full_path
+full_path: $yaml_full_path
 ---
 
 # $title
@@ -330,11 +361,11 @@ process_single_session() {
 }
 
 # Extract all metadata from JSONL file in one pass (fallback when not in index)
-# Returns: firstPrompt|messageCount|created|modified|gitBranch|projectPath
+# Returns JSON object with: firstPrompt, messageCount, created, modified, gitBranch, projectPath
 extract_all_jsonl_metadata() {
   local jsonl_file="$1"
 
-  # Single jq pass to extract all metadata
+  # Single jq pass to extract all metadata as JSON (avoids delimiter issues)
   jq -rs '
     def first_user_prompt:
       map(select(.type == "user" and .message.role == "user" and (.message.content | type == "string")))
@@ -357,9 +388,15 @@ extract_all_jsonl_metadata() {
     def project_path:
       map(select(.cwd)) | .[0].cwd // "";
 
-    [first_user_prompt, message_count, first_timestamp, last_timestamp, git_branch, project_path]
-    | join("|")
-  ' "$jsonl_file" 2>/dev/null || echo "|0||||"
+    {
+      firstPrompt: first_user_prompt,
+      messageCount: message_count,
+      created: first_timestamp,
+      modified: last_timestamp,
+      gitBranch: git_branch,
+      projectPath: project_path
+    }
+  ' "$jsonl_file" 2>/dev/null || echo '{"firstPrompt":"","messageCount":0,"created":"","modified":"","gitBranch":"unknown","projectPath":""}'
 }
 
 # Lookup session in index file (returns JSON entry or empty)
@@ -413,24 +450,25 @@ process_all_sessions() {
         local metadata
         metadata=$(extract_all_jsonl_metadata "$full_path")
 
-        # Parse pipe-delimited output: firstPrompt|messageCount|created|modified|gitBranch|projectPath
-        first_prompt=$(echo "$metadata" | cut -d'|' -f1)
-        message_count=$(echo "$metadata" | cut -d'|' -f2)
-        created=$(echo "$metadata" | cut -d'|' -f3)
-        modified=$(echo "$metadata" | cut -d'|' -f4)
-        git_branch=$(echo "$metadata" | cut -d'|' -f5)
-        project_path=$(echo "$metadata" | cut -d'|' -f6)
+        # Parse JSON output (avoids delimiter issues with | in content)
+        first_prompt=$(echo "$metadata" | jq -r '.firstPrompt // ""')
+        message_count=$(echo "$metadata" | jq -r '.messageCount // 0')
+        created=$(echo "$metadata" | jq -r '.created // ""')
+        modified=$(echo "$metadata" | jq -r '.modified // ""')
+        git_branch=$(echo "$metadata" | jq -r '.gitBranch // "unknown"')
+        project_path=$(echo "$metadata" | jq -r '.projectPath // ""')
 
         [[ -z "$first_prompt" ]] && first_prompt="Session $session_id"
         [[ -z "$message_count" ]] && message_count="0"
         [[ -z "$git_branch" ]] && git_branch="unknown"
 
-        # Fallback for project_path: derive from directory name
+        # Fallback for project_path: use directory name as-is (don't try lossy reconstruction)
+        # The dir name like -Users-somto-code-my-project can't reliably convert back
         if [[ -z "$project_path" ]]; then
           local dir_name
           dir_name=$(basename "$project_dir")
-          # Convert -Users-somto-code-project back to /Users/somto/code/project
-          project_path=$(echo "$dir_name" | sed 's/^-/\//' | LC_ALL=C tr '-' '/')
+          # Use dir_name directly - it's the encoded project identifier
+          project_path="$dir_name"
         fi
       fi
 
