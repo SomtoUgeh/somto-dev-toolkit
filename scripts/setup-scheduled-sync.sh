@@ -104,12 +104,40 @@ install_cron() {
     echo "To verify: crontab -l | grep session-sync"
     echo "To uninstall: ./scripts/uninstall-scheduled-sync.sh"
 
-    # WSL-specific note
+    # WSL-specific: auto-start cron
     if grep -qi microsoft /proc/version 2>/dev/null; then
         echo ""
-        echo "⚠️  WSL detected: Ensure cron service is running:"
-        echo "    sudo service cron start"
-        echo "    # Or add to ~/.bashrc: sudo service cron status &>/dev/null || sudo service cron start"
+        echo "⚠️  WSL detected: Setting up cron auto-start..."
+
+        # Determine shell rc file
+        local rc_file="$HOME/.bashrc"
+        if [[ -n "$ZSH_VERSION" ]] || [[ "$SHELL" == */zsh ]]; then
+            rc_file="$HOME/.zshrc"
+        fi
+
+        # Add auto-start to rc file if not already present
+        local cron_line='pgrep -x cron >/dev/null || sudo service cron start'
+        if ! grep -qF "pgrep -x cron" "$rc_file" 2>/dev/null; then
+            echo "" >> "$rc_file"
+            echo "# Auto-start cron for scheduled tasks (added by claude plugin)" >> "$rc_file"
+            echo "$cron_line" >> "$rc_file"
+            echo "  ✓ Added cron auto-start to $rc_file"
+        else
+            echo "  ✓ Cron auto-start already in $rc_file"
+        fi
+
+        # Try to start cron now
+        if pgrep -x cron >/dev/null 2>&1; then
+            echo "  ✓ Cron service already running"
+        else
+            echo ""
+            echo "  Cron service not running. Start it with:"
+            echo "    sudo service cron start"
+            echo ""
+            echo "  For passwordless auto-start, run:"
+            echo "    echo \"\$USER ALL=(ALL) NOPASSWD: /usr/sbin/service cron start\" | sudo tee /etc/sudoers.d/cron-nopasswd"
+            echo "    sudo chmod 440 /etc/sudoers.d/cron-nopasswd"
+        fi
     fi
 }
 
