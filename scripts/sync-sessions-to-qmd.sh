@@ -63,15 +63,21 @@ get_project_name() {
   fi
 }
 
-# Escape a value for YAML (quote if contains special chars)
+# Escape a value for YAML (quote and escape when needed)
 yaml_escape() {
   local val="$1"
+  local escaped=""
   # Quote if contains YAML special chars or starts with - or >
   # Use case pattern matching to avoid regex escaping issues
   case "$val" in
     *:*|*\#*|*\[*|*\]*|*\{*|*\}*|*,*|*\&*|*\**|*\!*|*\|*|*\'*|*\"*|*%*|*@*|-*|\>*)
-      # Escape double quotes and wrap in double quotes
-      printf '"%s"' "${val//\"/\\\"}"
+      # Escape backslashes and double quotes, normalize newlines
+      escaped=$val
+      escaped=${escaped//\\/\\\\}
+      escaped=${escaped//\"/\\\"}
+      escaped=${escaped//$'\n'/\\n}
+      escaped=${escaped//$'\r'/\\r}
+      printf '"%s"' "$escaped"
       ;;
     *)
       printf '%s' "$val"
@@ -121,7 +127,7 @@ extract_user_prompts() {
       /^#/ { next }
       /This session is being continued/ { next }
       /^Analysis:/ { next }
-      NR <= 20 { print }
+      { if (++count <= 20) print }
     '
 }
 
@@ -140,7 +146,7 @@ extract_assistant_insights() {
       /^\[/ { next }
       /^</ { next }
       /^🏁/ { next }
-      NR <= 30 { print substr($0,1,500) }
+      { if (++count <= 30) print substr($0,1,500) }
     '
 }
 
@@ -172,7 +178,10 @@ extract_key_actions() {
     select(.type == "tool_use") |
     select(.name == "Read" or .name == "Edit" or .name == "Write") |
     "- \(.name): \(.input.file_path // empty)"
-  ' "$jsonl_file" 2>/dev/null | grep -v ': $' | awk 'NR<=10' || echo "")
+  ' "$jsonl_file" 2>/dev/null | awk '
+    /: $/ { next }
+    NF { if (++count <= 10) print }
+  ' || echo "")
 
   # Extract Bash commands (just the command, truncated)
   local bash_cmds
@@ -184,7 +193,9 @@ extract_key_actions() {
   ' "$jsonl_file" 2>/dev/null | awk 'NR<=5 {print "- Ran: " substr($0,1,60)}' || echo "")
 
   # Combine
-  printf "%s\n%s" "$file_actions" "$bash_cmds" | grep -v '^$' | awk 'NR<=15'
+  printf "%s\n%s" "$file_actions" "$bash_cmds" | awk '
+    NF { if (++count <= 15) print }
+  '
 }
 
 # Generate markdown for a single session
@@ -243,8 +254,9 @@ generate_session_markdown() {
   fi
 
   # Generate markdown with YAML-safe values
-  local yaml_project_path yaml_full_path yaml_branch
+  local yaml_project_path yaml_project_name yaml_full_path yaml_branch
   yaml_project_path=$(yaml_escape "$project_path")
+  yaml_project_name=$(yaml_escape "$project_name")
   yaml_full_path=$(yaml_escape "$full_path")
   yaml_branch=$(yaml_escape "$git_branch")
 
@@ -252,7 +264,7 @@ generate_session_markdown() {
 ---
 session_id: $session_id
 project_path: $yaml_project_path
-project_name: $project_name
+project_name: $yaml_project_name
 branch: $yaml_branch
 created: $created
 modified: $modified
