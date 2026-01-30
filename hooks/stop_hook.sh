@@ -139,6 +139,22 @@ extract_promise_last() {
   return 0
 }
 
+# Format mtime for logs in a cross-platform way (GNU/BSD stat).
+format_mtime() {
+  local file="$1"
+  local out
+
+  if out=$(stat -c "%y" "$file" 2>/dev/null); then
+    out="${out%%.*}"
+  elif out=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$file" 2>/dev/null); then
+    :
+  else
+    out="unknown"
+  fi
+
+  printf '%s' "$out"
+}
+
 # Escape special characters for sed replacement string
 # Escapes: / & \ | newlines (prevents injection when variable contains these)
 # Usage: ESCAPED=$(escape_sed_replacement "$UNSAFE_VALUE")
@@ -311,7 +327,7 @@ if [[ ! "$SESSION_ID" =~ ^[a-zA-Z0-9_-]+$ ]]; then
     echo "       Loop state files found (may be stale):" >&2
     echo "$STATE_FILES" | while read -r f; do
       if [[ -n "$f" ]]; then
-        MTIME=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$f" 2>/dev/null || stat -c "%y" "$f" 2>/dev/null | cut -d. -f1 || echo "unknown")
+        MTIME=$(format_mtime "$f")
         echo "         - $f (modified: $MTIME)" >&2
       fi
     done

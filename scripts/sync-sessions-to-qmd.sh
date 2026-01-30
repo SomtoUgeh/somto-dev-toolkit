@@ -57,6 +57,28 @@ get_project_name() {
   basename "$1"
 }
 
+# Get numeric mtime in a cross-platform way (Linux/WSL vs macOS BSD stat).
+get_mtime() {
+  local file="$1"
+  local mtime="0"
+
+  # Prefer GNU stat on Linux/WSL; fallback to BSD stat on macOS.
+  if mtime=$(stat -c %Y "$file" 2>/dev/null); then
+    :
+  elif mtime=$(stat -f %m "$file" 2>/dev/null); then
+    :
+  else
+    mtime=0
+  fi
+
+  # Guard against non-numeric output (e.g., GNU stat -f filesystem info).
+  if [[ ! "$mtime" =~ ^[0-9]+$ ]]; then
+    mtime=0
+  fi
+
+  printf '%s' "$mtime"
+}
+
 # Extract summary from JSONL file (first line with type:summary)
 extract_summary() {
   local jsonl_file="$1"
@@ -163,8 +185,8 @@ generate_session_markdown() {
   # Check if we should skip (incremental mode)
   if [[ "$MODE" == "incremental" && -f "$output_file" && -n "${full_path:-}" ]]; then
     local md_mtime jsonl_mtime
-    md_mtime=$(stat -f %m "$output_file" 2>/dev/null || stat --format=%Y "$output_file" 2>/dev/null || echo 0)
-    jsonl_mtime=$(stat -f %m "$full_path" 2>/dev/null || stat --format=%Y "$full_path" 2>/dev/null || echo 0)
+    md_mtime=$(get_mtime "$output_file")
+    jsonl_mtime=$(get_mtime "$full_path")
     if [[ "$md_mtime" -gt "$jsonl_mtime" ]]; then
       return 0  # Skip - markdown is newer
     fi
