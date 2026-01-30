@@ -271,9 +271,27 @@ crontab -l | grep session     # Linux
 
 **Scheduler not running?**
 - macOS: `launchctl list | grep claude`
-- Linux/WSL: `crontab -l`
-- WSL: Ensure cron running: `sudo service cron start`
+- Linux/WSL: `crontab -l | grep session-sync`
 - Logs: `tail ~/.claude/session-sync.log`
+
+**WSL: Cron not running?**
+
+WSL doesn't auto-start cron on boot. The setup script configures this automatically, but if needed:
+
+```bash
+# Check if cron is running
+pgrep -x cron || echo "Cron not running"
+
+# Start cron (one-time)
+sudo service cron start
+
+# Setup passwordless sudo for auto-start
+echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/service cron start" | sudo tee /etc/sudoers.d/cron-nopasswd
+sudo chmod 440 /etc/sudoers.d/cron-nopasswd
+
+# Add auto-start to shell (if not already present)
+echo 'pgrep -x cron >/dev/null || sudo service cron start' >> ~/.zshrc  # or ~/.bashrc
+```
 
 ## Uninstall
 
