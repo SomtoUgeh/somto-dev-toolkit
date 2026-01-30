@@ -1420,15 +1420,24 @@ reviews_complete: true" "$STATE_FILE"
         fi
         ;;
       "4")
-        # Check if PRD JSON file exists at convention path
+        # Check if PRD JSON file exists with valid schema
         PRD_TO_CHECK="${PRD_PATH:-$EXPECTED_PRD}"
-        if [[ -f "$PRD_TO_CHECK" ]] && jq empty "$PRD_TO_CHECK" 2>/dev/null; then
-          echo "⚠️  Loop (prd): Phase 4 work detected (PRD file exists). Auto-advancing to 5." >&2
-          NEXT_PHASE="5"
-          PRD_PATH="$PRD_TO_CHECK"
-          ESCAPED_PATH=$(escape_sed_replacement "$PRD_PATH")
-          sed_inplace "s|^prd_path: .*|prd_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
-          SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 4→5 (marker missing but PRD exists)"
+        if [[ -f "$PRD_TO_CHECK" ]]; then
+          # Validate minimum schema: has required root fields, stories is non-empty array
+          if jq -e '
+            has("title") and has("spec_path") and has("created_at") and has("stories") and has("log") and
+            (.stories | type == "array" and length > 0) and
+            (.stories | all(has("id") and has("title") and has("category") and has("steps") and has("passes") and has("priority")))
+          ' "$PRD_TO_CHECK" >/dev/null 2>&1; then
+            echo "⚠️  Loop (prd): Phase 4 work detected (PRD file exists with valid schema). Auto-advancing to 5." >&2
+            NEXT_PHASE="5"
+            PRD_PATH="$PRD_TO_CHECK"
+            ESCAPED_PATH=$(escape_sed_replacement "$PRD_PATH")
+            sed_inplace "s|^prd_path: .*|prd_path: \"$ESCAPED_PATH\"|" "$STATE_FILE"
+            SYSTEM_MSG="⚠️ Loop (prd): Auto-advanced from 4→5 (marker missing but PRD schema valid)"
+          else
+            echo "⚠️  Loop (prd): PRD file exists but schema invalid. Continue Phase 4." >&2
+          fi
         fi
         ;;
       "5")

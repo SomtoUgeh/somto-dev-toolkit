@@ -296,50 +296,83 @@ Generate `plans/<feature>/prd.json` with **atomic** stories.
 - When splitting a story mid-loop, use decimals (e.g., 10.1, 10.2, 10.3)
 - Before finalizing: verify `jq '[.stories[].priority] | unique | length == (.stories | length)'`
 
-**Pre-commit validation (run before outputting phase marker):**
+**Pre-commit validation (MANDATORY - run ALL before outputting phase marker):**
 ```bash
-# Validate no story has >7 steps
-jq -e '[.stories[] | select((.steps | length) > 7)] | length == 0' prd.json
+# 1. Validate root-level schema (all required fields exist)
+jq -e 'has("title") and has("spec_path") and has("created_at") and has("stories") and has("log")' prd.json
 
-# Validate no duplicate priorities
+# 2. Validate stories is non-empty array
+jq -e '.stories | type == "array" and length > 0' prd.json
+
+# 3. Validate EVERY story has ALL required fields with correct types
+jq -e '
+  .stories | all(
+    has("id") and has("title") and has("category") and has("skills") and
+    has("steps") and has("passes") and has("priority") and
+    has("completed_at") and has("commit") and
+    (.id | type == "number") and
+    (.title | type == "string") and
+    (.category | type == "string") and
+    (.skills | type == "array") and
+    (.steps | type == "array" and all(type == "string")) and
+    (.passes | type == "boolean") and
+    (.priority | type == "number") and
+    (.completed_at == null or (.completed_at | type == "string")) and
+    (.commit == null or (.commit | type == "string"))
+  )
+' prd.json
+
+# 4. Validate category is one of allowed values
+jq -e '.stories | all(.category | IN("functional", "ui", "integration", "edge-case", "performance"))' prd.json
+
+# 5. Validate steps count (3-7 per story)
+jq -e '.stories | all(.steps | length >= 3 and length <= 7)' prd.json
+
+# 6. Validate no duplicate priorities
 jq -e '([.stories[].priority] | unique | length) == (.stories | length)' prd.json
 
-# Validate priorities are sorted
+# 7. Validate priorities are sorted ascending
 jq -e '[.stories[].priority] | . == sort' prd.json
+
+# 8. Validate log is array (can be empty initially)
+jq -e '.log | type == "array"' prd.json
 ```
 
-If any validation fails, fix before proceeding.
+**If ANY validation fails, FIX before proceeding. Do NOT output phase marker until all 8 pass.**
 
-**prd.json schema (single source of truth):**
+**prd.json schema (STRICT - all fields required, exact types enforced):**
 ```json
 {
-  "title": "feature-name",
-  "spec_path": "plans/<feature>/spec.md",
-  "created_at": "ISO8601",
-  "stories": [
+  "title": "feature-name",           // string: kebab-case feature name
+  "spec_path": "plans/<feature>/spec.md",  // string: path to spec file
+  "created_at": "2026-01-30T12:00:00Z",    // string: ISO8601 timestamp
+  "stories": [                       // array: non-empty list of stories
     {
-      "id": 1,
-      "title": "User can create account",
-      "category": "functional|ui|integration|edge-case|performance",
-      "skills": ["skill-name-1", "skill-name-2"],
-      "steps": ["Step 1", "Step 2", "..."],
-      "passes": false,
-      "priority": 1,
-      "completed_at": null,
-      "commit": null
+      "id": 1,                       // number: unique integer, starts at 1
+      "title": "User can create account",  // string: single action, no "and"
+      "category": "functional",      // string: MUST be one of: functional|ui|integration|edge-case|performance
+      "skills": ["skill-name"],      // array: skill names (can be empty [])
+      "steps": ["Step 1", "Step 2"], // array: 3-7 string verification steps
+      "passes": false,               // boolean: MUST be false initially
+      "priority": 10,                // number: unique, spaced by 10 (10,20,30...)
+      "completed_at": null,          // null|string: MUST be null initially
+      "commit": null                 // null|string: MUST be null initially
     }
   ],
-  "log": []
+  "log": []                          // array: MUST be empty [] initially
 }
 ```
 
-**Fields:**
-- `id`: Stable reference for progress tracking
-- `category`: `functional`, `ui`, `integration`, `edge-case`, `performance`
-- `skills`: Array of skill names (required for `ui` category, optional otherwise)
-- `steps`: 3-7 explicit verification steps
-- `passes`: Starts `false`, set `true` when verified
-- `priority`: 1=first (riskier/foundational), higher=later (polish)
+**Field requirements (ENFORCED by validation):**
+- `id`: number, unique integer starting at 1
+- `title`: string, single action (no "and" - indicates need to split)
+- `category`: string, EXACTLY one of: `functional`, `ui`, `integration`, `edge-case`, `performance`
+- `skills`: array of strings (empty `[]` allowed, required content for `ui` category)
+- `steps`: array of 3-7 strings, explicit verification steps
+- `passes`: boolean, MUST be `false` on creation
+- `priority`: number, unique per story, use spacing of 10 (10, 20, 30...)
+- `completed_at`: `null` on creation, ISO8601 string when completed
+- `commit`: `null` on creation, commit hash string when completed
 
 **Output:** `<phase_complete phase="4" prd_path="plans/<feature>/prd.json"/>`
 
