@@ -329,6 +329,51 @@ process_single_session() {
     "unknown" "$SINGLE_PROJECT"
 }
 
+# Extract all metadata from JSONL file in one pass (fallback when not in index)
+# Returns: firstPrompt|messageCount|created|modified|gitBranch|projectPath
+extract_all_jsonl_metadata() {
+  local jsonl_file="$1"
+
+  # Single jq pass to extract all metadata
+  jq -rs '
+    def first_user_prompt:
+      map(select(.type == "user" and .message.role == "user" and (.message.content | type == "string")))
+      | .[0].message.content // ""
+      | gsub("^\\[.*"; "") | gsub("^<.*"; "")
+      | .[0:200];
+
+    def message_count:
+      map(select(.type == "user" or .type == "assistant")) | length;
+
+    def first_timestamp:
+      map(select(.timestamp)) | .[0].timestamp // "";
+
+    def last_timestamp:
+      map(select(.timestamp)) | .[-1].timestamp // "";
+
+    def git_branch:
+      map(select(.cwd)) | .[0].gitBranch // "unknown";
+
+    def project_path:
+      map(select(.cwd)) | .[0].cwd // "";
+
+    [first_user_prompt, message_count, first_timestamp, last_timestamp, git_branch, project_path]
+    | join("|")
+  ' "$jsonl_file" 2>/dev/null || echo "|0||||"
+}
+
+# Lookup session in index file (returns JSON entry or empty)
+lookup_session_in_index() {
+  local jsonl_path="$1"
+  local project_dir
+  project_dir=$(dirname "$jsonl_path")
+  local index_file="$project_dir/sessions-index.json"
+
+  [[ -f "$index_file" ]] || return 0
+
+  jq -c --arg path "$jsonl_path" '.entries[] | select(.fullPath == $path)' "$index_file" 2>/dev/null || true
+}
+
 # Process all sessions
 process_all_sessions() {
   local total=0
@@ -338,44 +383,66 @@ process_all_sessions() {
   echo "Mode: $MODE"
   echo ""
 
-  # Find all sessions-index.json files
-  for index_file in "$PROJECTS_DIR"/*/sessions-index.json; do
-    [[ -f "$index_file" ]] || continue
+  # Scan all JSONL files directly (doesn't rely on sessions-index.json)
+  for project_dir in "$PROJECTS_DIR"/*/; do
+    [[ -d "$project_dir" ]] || continue
 
-    local project_dir
-    project_dir=$(dirname "$index_file")
-
-    # Process each session in the index
-    local entries
-    entries=$(jq -c '.entries[]' "$index_file" 2>/dev/null) || continue
-
-    while IFS= read -r entry; do
-      [[ -z "$entry" ]] && continue
+    for jsonl_file in "$project_dir"*.jsonl; do
+      [[ -f "$jsonl_file" ]] || continue
 
       local session_id full_path first_prompt message_count created modified git_branch project_path
-      session_id=$(echo "$entry" | jq -r '.sessionId')
-      full_path=$(echo "$entry" | jq -r '.fullPath')
-      first_prompt=$(echo "$entry" | jq -r '.firstPrompt // "No prompt"')
-      message_count=$(echo "$entry" | jq -r '.messageCount // 0')
-      created=$(echo "$entry" | jq -r '.created // ""')
-      modified=$(echo "$entry" | jq -r '.modified // ""')
-      git_branch=$(echo "$entry" | jq -r '.gitBranch // "unknown"')
-      project_path=$(echo "$entry" | jq -r '.projectPath // ""')
 
-      # Skip if session file doesn't exist
-      [[ -f "$full_path" ]] || continue
+      session_id=$(basename "$jsonl_file" .jsonl)
+      full_path="$jsonl_file"
 
       ((total++)) || true
+
+      # Try to get metadata from index first (faster)
+      local entry
+      entry=$(lookup_session_in_index "$full_path")
+
+      if [[ -n "$entry" ]]; then
+        first_prompt=$(echo "$entry" | jq -r '.firstPrompt // "No prompt"')
+        message_count=$(echo "$entry" | jq -r '.messageCount // 0')
+        created=$(echo "$entry" | jq -r '.created // ""')
+        modified=$(echo "$entry" | jq -r '.modified // ""')
+        git_branch=$(echo "$entry" | jq -r '.gitBranch // "unknown"')
+        project_path=$(echo "$entry" | jq -r '.projectPath // ""')
+      else
+        # Extract all metadata from JSONL in one pass (session not in index)
+        local metadata
+        metadata=$(extract_all_jsonl_metadata "$full_path")
+
+        # Parse pipe-delimited output: firstPrompt|messageCount|created|modified|gitBranch|projectPath
+        first_prompt=$(echo "$metadata" | cut -d'|' -f1)
+        message_count=$(echo "$metadata" | cut -d'|' -f2)
+        created=$(echo "$metadata" | cut -d'|' -f3)
+        modified=$(echo "$metadata" | cut -d'|' -f4)
+        git_branch=$(echo "$metadata" | cut -d'|' -f5)
+        project_path=$(echo "$metadata" | cut -d'|' -f6)
+
+        [[ -z "$first_prompt" ]] && first_prompt="Session $session_id"
+        [[ -z "$message_count" ]] && message_count="0"
+        [[ -z "$git_branch" ]] && git_branch="unknown"
+
+        # Fallback for project_path: derive from directory name
+        if [[ -z "$project_path" ]]; then
+          local dir_name
+          dir_name=$(basename "$project_dir")
+          # Convert -Users-somto-code-project back to /Users/somto/code/project
+          project_path=$(echo "$dir_name" | sed 's/^-/\//' | LC_ALL=C tr '-' '/')
+        fi
+      fi
 
       if generate_session_markdown "$session_id" "$full_path" "$first_prompt" \
         "$message_count" "$created" "$modified" "$git_branch" "$project_path"; then
         ((processed++)) || true
       fi
-    done <<< "$entries"
+    done
   done
 
   echo ""
-  echo "Done: $processed sessions synced"
+  echo "Done: $total sessions found, $processed synced"
   echo "Output: $OUTPUT_DIR"
 }
 
