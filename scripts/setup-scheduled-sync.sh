@@ -126,17 +126,34 @@ install_cron() {
             echo "  ✓ Cron auto-start already in $rc_file"
         fi
 
-        # Try to start cron now
+        # Setup passwordless sudo for cron (if not already configured)
+        local sudoers_file="/etc/sudoers.d/cron-nopasswd"
+        if [[ ! -f "$sudoers_file" ]]; then
+            echo ""
+            echo "  Setting up passwordless sudo for cron..."
+            echo "  (You may be prompted for your password once)"
+            echo ""
+            if echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/service cron start" | sudo tee "$sudoers_file" >/dev/null 2>&1; then
+                sudo chmod 440 "$sudoers_file" 2>/dev/null
+                echo "  ✓ Passwordless sudo configured"
+            else
+                echo "  ⚠️  Could not configure passwordless sudo. Run manually:"
+                echo "    echo \"\$USER ALL=(ALL) NOPASSWD: /usr/sbin/service cron start\" | sudo tee $sudoers_file"
+                echo "    sudo chmod 440 $sudoers_file"
+            fi
+        else
+            echo "  ✓ Passwordless sudo already configured"
+        fi
+
+        # Start cron now
         if pgrep -x cron >/dev/null 2>&1; then
             echo "  ✓ Cron service already running"
         else
-            echo ""
-            echo "  Cron service not running. Start it with:"
-            echo "    sudo service cron start"
-            echo ""
-            echo "  For passwordless auto-start, run:"
-            echo "    echo \"\$USER ALL=(ALL) NOPASSWD: /usr/sbin/service cron start\" | sudo tee /etc/sudoers.d/cron-nopasswd"
-            echo "    sudo chmod 440 /etc/sudoers.d/cron-nopasswd"
+            if sudo service cron start >/dev/null 2>&1; then
+                echo "  ✓ Cron service started"
+            else
+                echo "  ⚠️  Could not start cron. Run: sudo service cron start"
+            fi
         fi
     fi
 }
