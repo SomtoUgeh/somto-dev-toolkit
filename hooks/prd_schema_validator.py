@@ -9,7 +9,7 @@ import json
 import sys
 
 REQUIRED_ROOT_FIELDS = {"title", "spec_path", "created_at", "stories", "log"}
-REQUIRED_STORY_FIELDS = {"id", "title", "category", "skills", "steps", "passes", "priority", "completed_at", "commit"}
+REQUIRED_STORY_FIELDS = {"id", "title", "category", "skills", "depends_on", "acceptance_criteria", "passes", "priority", "completed_at", "commit"}
 VALID_CATEGORIES = {"functional", "ui", "integration", "edge-case", "performance"}
 
 
@@ -62,12 +62,16 @@ def validate_prd(prd: dict) -> list[str]:
             errors.append(f"{prefix}.category: must be one of {', '.join(sorted(VALID_CATEGORIES))}")
         if not isinstance(story.get("skills"), list):
             errors.append(f"{prefix}.skills: must be an array")
-        if not isinstance(story.get("steps"), list):
-            errors.append(f"{prefix}.steps: must be an array")
-        elif not all(isinstance(s, str) for s in story["steps"]):
-            errors.append(f"{prefix}.steps: all items must be strings")
-        elif len(story["steps"]) < 3 or len(story["steps"]) > 7:
-            errors.append(f"{prefix}.steps: must have 3-7 items (has {len(story['steps'])})")
+        if not isinstance(story.get("depends_on"), list):
+            errors.append(f"{prefix}.depends_on: must be an array")
+        elif not all(isinstance(d, (int, float)) for d in story["depends_on"]):
+            errors.append(f"{prefix}.depends_on: all items must be story IDs (numbers)")
+        if not isinstance(story.get("acceptance_criteria"), list):
+            errors.append(f"{prefix}.acceptance_criteria: must be an array")
+        elif not all(isinstance(s, str) for s in story["acceptance_criteria"]):
+            errors.append(f"{prefix}.acceptance_criteria: all items must be strings")
+        elif len(story["acceptance_criteria"]) < 1:
+            errors.append(f"{prefix}.acceptance_criteria: must have at least 1 item")
         if not isinstance(story.get("passes"), bool):
             errors.append(f"{prefix}.passes: must be a boolean")
         if not isinstance(story.get("priority"), (int, float)):
@@ -88,6 +92,17 @@ def validate_prd(prd: dict) -> list[str]:
     # Check priorities are sorted
     if priorities != sorted(priorities):
         errors.append("Priorities must be in ascending order")
+
+    # Validate depends_on references valid story IDs
+    all_ids = {s.get("id") for s in stories if isinstance(s, dict) and isinstance(s.get("id"), (int, float))}
+    for i, story in enumerate(stories):
+        if not isinstance(story, dict):
+            continue
+        deps = story.get("depends_on", [])
+        if isinstance(deps, list):
+            for dep in deps:
+                if dep not in all_ids:
+                    errors.append(f"stories[{i}].depends_on: references non-existent story ID {dep}")
 
     return errors
 

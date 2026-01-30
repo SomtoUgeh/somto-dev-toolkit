@@ -286,7 +286,7 @@ Generate `plans/<feature>/prd.json` with **atomic** stories.
 
 **Story size rules (HARD LIMITS - ENFORCED):**
 - Each story = ONE iteration (~15-30 min)
-- **MAX 7 steps per story** - If >7, MUST split before proceeding
+- Each acceptance criterion = ONE verifiable outcome
 - If >3 files touched → consider splitting
 - If "and" in title → probably 2 stories
 
@@ -308,13 +308,14 @@ jq -e '.stories | type == "array" and length > 0' prd.json
 jq -e '
   .stories | all(
     has("id") and has("title") and has("category") and has("skills") and
-    has("steps") and has("passes") and has("priority") and
+    has("depends_on") and has("acceptance_criteria") and has("passes") and has("priority") and
     has("completed_at") and has("commit") and
     (.id | type == "number") and
     (.title | type == "string") and
     (.category | type == "string") and
     (.skills | type == "array") and
-    (.steps | type == "array" and all(type == "string")) and
+    (.depends_on | type == "array" and all(type == "number")) and
+    (.acceptance_criteria | type == "array" and all(type == "string")) and
     (.passes | type == "boolean") and
     (.priority | type == "number") and
     (.completed_at == null or (.completed_at | type == "string")) and
@@ -325,8 +326,15 @@ jq -e '
 # 4. Validate category is one of allowed values
 jq -e '.stories | all(.category | IN("functional", "ui", "integration", "edge-case", "performance"))' prd.json
 
-# 5. Validate steps count (3-7 per story)
-jq -e '.stories | all(.steps | length >= 3 and length <= 7)' prd.json
+# 5. Validate acceptance_criteria has at least 1 item per story
+jq -e '.stories | all(.acceptance_criteria | length >= 1)' prd.json
+
+# 5b. Validate depends_on references valid story IDs
+jq -e '
+  . as $prd |
+  ($prd.stories | map(.id)) as $ids |
+  $prd.stories | all(.depends_on | all(. as $dep | $ids | contains([$dep])))
+' prd.json
 
 # 6. Validate no duplicate priorities
 jq -e '([.stories[].priority] | unique | length) == (.stories | length)' prd.json
@@ -352,7 +360,11 @@ jq -e '.log | type == "array"' prd.json
       "title": "User can create account",  // string: single action, no "and"
       "category": "functional",      // string: MUST be one of: functional|ui|integration|edge-case|performance
       "skills": ["skill-name"],      // array: skill names (can be empty [])
-      "steps": ["Step 1", "Step 2"], // array: 3-7 string verification steps
+      "depends_on": [],              // array: story IDs this blocks on (can be empty [])
+      "acceptance_criteria": [       // array: declarative outcomes (at least 1)
+        "Given signup form, when valid data submitted, account is created",
+        "When email already exists, error message displays"
+      ],
       "passes": false,               // boolean: MUST be false initially
       "priority": 10,                // number: unique, spaced by 10 (10,20,30...)
       "completed_at": null,          // null|string: MUST be null initially
@@ -368,7 +380,8 @@ jq -e '.log | type == "array"' prd.json
 - `title`: string, single action (no "and" - indicates need to split)
 - `category`: string, EXACTLY one of: `functional`, `ui`, `integration`, `edge-case`, `performance`
 - `skills`: array of strings (empty `[]` allowed, required content for `ui` category)
-- `steps`: array of 3-7 strings, explicit verification steps
+- `depends_on`: array of story IDs (numbers) that must complete first (empty `[]` allowed)
+- `acceptance_criteria`: array of strings (at least 1), declarative "Given/When/Then" or outcome statements
 - `passes`: boolean, MUST be `false` on creation
 - `priority`: number, unique per story, use spacing of 10 (10, 20, 30...)
 - `completed_at`: `null` on creation, ISO8601 string when completed
