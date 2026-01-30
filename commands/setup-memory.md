@@ -286,6 +286,7 @@ crontab -l | grep session     # Linux
 # Remove hook scripts
 rm ~/.claude/hooks/memory_injection.py
 rm ~/.claude/hooks/prompt_context.py
+rm ~/.claude/hooks/keyword_extractor.py
 
 # Optionally remove indexed sessions
 rm -rf ~/.claude/qmd-sessions/
