@@ -84,15 +84,22 @@ def extract_session_id_from_path(file_path: str) -> str:
     return os.path.basename(file_path).replace(".md", "")
 
 
-def format_output(memories: list[dict]) -> tuple[str, list[str]]:
-    """Format combined output: fork suggestion (first) + memory context (rest)."""
-    if not memories:
-        return "", []
+def format_output(memories: list[dict]) -> tuple[str, str, list[str]]:
+    """Format combined output: fork suggestion (first) + memory context (rest).
 
-    parts = []
+    Returns (user_message, claude_context, doc_ids):
+    - user_message: Shown to user via systemMessage (fork suggestion only)
+    - claude_context: Full context for Claude via additionalContext
+    - doc_ids: Document IDs for deduplication
+    """
+    if not memories:
+        return "", "", []
+
+    user_parts = []
+    context_parts = []
     doc_ids = []
 
-    # First result: fork suggestion
+    # First result: fork suggestion (shown to user AND Claude)
     first = memories[0]
     title = first.get("title", first.get("path", ""))
     file_path = first.get("file", first.get("path", ""))
@@ -100,14 +107,17 @@ def format_output(memories: list[dict]) -> tuple[str, list[str]]:
 
     if title and file_path:
         session_id = extract_session_id_from_path(file_path)
-        parts.append(f"""🔍 SIMILAR PAST SESSION FOUND:
+        fork_msg = f'🔍 Similar session: "{title}" → claude --resume {session_id} --fork-session'
+        user_parts.append(fork_msg)
+        context_parts.append(f"""SIMILAR PAST SESSION FOUND:
 "{title}"
+Session ID: {session_id}
 To fork: claude --resume {session_id} --fork-session""")
         doc_ids.append(doc_id)
 
-    # Remaining results: memory context
+    # Remaining results: memory context (Claude only, not shown to user)
     if len(memories) > 1:
-        parts.append("\n📚 ADDITIONAL RELEVANT SESSIONS:")
+        context_parts.append("\n📚 ADDITIONAL RELEVANT SESSIONS:")
         for mem in memories[1:MAX_RESULTS + 1]:
             mem_file = mem.get("file", mem.get("path", ""))
             title = mem.get("title", mem_file)
@@ -115,12 +125,12 @@ To fork: claude --resume {session_id} --fork-session""")
             doc_id = mem.get("id", mem_file)
             if not title:
                 continue
-            parts.append(f"\n• {title}")
+            context_parts.append(f"\n• {title}")
             if snippet:
-                parts.append(f"  {snippet}...")
+                context_parts.append(f"  {snippet}...")
             doc_ids.append(doc_id)
 
-    return "\n".join(parts), doc_ids
+    return "\n".join(user_parts), "\n".join(context_parts), doc_ids
 
 
 def main():
@@ -138,11 +148,15 @@ def main():
     if not memories:
         sys.exit(0)
 
-    context, doc_ids = format_output(memories)
-    if context and doc_ids:
+    user_message, claude_context, doc_ids = format_output(memories)
+    if doc_ids:
         session_id = os.environ.get("CLAUDE_SESSION_ID", "")
         add_shown_memories(session_id, doc_ids)
-        print(json.dumps({"additionalContext": context}))
+
+        # Plain text stdout is "shown as hook output in the transcript" per docs
+        # This is the most reliable way to display to user from UserPromptSubmit
+        if user_message:
+            print(user_message)
 
     sys.exit(0)
 
