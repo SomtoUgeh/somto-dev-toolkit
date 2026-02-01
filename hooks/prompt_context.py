@@ -128,8 +128,13 @@ To fork: claude --resume {session_id} --fork-session""")
             if not title:
                 continue
             context_parts.append(f"\n• {title}")
+            context_parts.append(f"  File: {mem_file}")
             if snippet:
                 context_parts.append(f"  {snippet}...")
+
+    # Add instruction for fetching full content
+    if memories:
+        context_parts.append("\n💡 To get full session content: qmd get <file> -l 200")
             doc_ids.append(doc_id)
 
     return "\n".join(user_parts), "\n".join(context_parts), doc_ids
