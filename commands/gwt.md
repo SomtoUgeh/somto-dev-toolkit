@@ -57,10 +57,6 @@ Manage git worktrees as sibling directories to avoid Turbopack/IDE conflicts.
 - This avoids Turbopack/IDE conflicts with multiple lockfiles
 - .env files are automatically copied from main repo
 
-## Prerequisites
-
-The `gwt` script must be installed. Run `/setup-gwt` to install it.
-
 ## Success Criteria
 
 - [ ] Worktree created/listed/removed successfully

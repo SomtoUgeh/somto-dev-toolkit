@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Git Worktree Manager (gwt)
-# Uses sibling directories to avoid Turbopack/IDE conflicts
+# Uses a centralized worktrees folder to keep main code directory clean
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 SEPARATOR="--"
 
 # Colors
@@ -68,23 +68,33 @@ get_main_repo_dir() {
   fi
 }
 
-# Get parent directory where worktrees live
+# Get parent directory of the main repo
 get_parent_dir() {
   dirname "$(get_main_repo_dir)"
+}
+
+# Get the worktrees directory (centralized folder for all worktrees)
+get_worktrees_dir() {
+  # Use GWT_WORKTREE_DIR if set, otherwise default to parent/worktrees
+  if [[ -n "${GWT_WORKTREE_DIR:-}" ]]; then
+    echo "$GWT_WORKTREE_DIR"
+  else
+    echo "$(get_parent_dir)/worktrees"
+  fi
 }
 
 # Compute worktree path for a branch
 get_worktree_path() {
   local branch="$1"
-  local repo_name parent_dir
+  local repo_name worktrees_dir
   repo_name=$(get_repo_name)
-  parent_dir=$(get_parent_dir)
+  worktrees_dir=$(get_worktrees_dir)
 
   # Sanitize branch name (replace / with -)
   local sanitized_branch
   sanitized_branch=$(echo "$branch" | tr '/' '-')
 
-  echo "${parent_dir}/${repo_name}${SEPARATOR}${sanitized_branch}"
+  echo "${worktrees_dir}/${repo_name}${SEPARATOR}${sanitized_branch}"
 }
 
 # Copy .env files from main repo to worktree
@@ -120,7 +130,7 @@ find_worktree_by_branch() {
     path=$(echo "$line" | awk '{print $1}')
     branch=$(echo "$line" | awk '{print $3}' | tr -d '[]')
 
-    # Check if this worktree belongs to our repo (sibling pattern)
+    # Check if this worktree belongs to our repo
     local dir_name
     dir_name=$(basename "$path")
 
@@ -163,9 +173,16 @@ cmd_new() {
 
   [[ -z "$branch" ]] && die "Usage: gwt new <branch> [from]"
 
-  local main_dir worktree_path
+  local main_dir worktree_path worktrees_dir
   main_dir=$(get_main_repo_dir)
   worktree_path=$(get_worktree_path "$branch")
+  worktrees_dir=$(get_worktrees_dir)
+
+  # Create worktrees directory if it doesn't exist
+  if [[ ! -d "$worktrees_dir" ]]; then
+    info "Creating worktrees directory: $worktrees_dir"
+    mkdir -p "$worktrees_dir"
+  fi
 
   # Check if worktree already exists
   if [[ -d "$worktree_path" ]]; then
@@ -316,11 +333,12 @@ cmd_rm() {
 }
 
 cmd_here() {
-  local toplevel branch repo_name main_dir
+  local toplevel branch repo_name main_dir worktrees_dir
   toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || die "Not in a git repository"
   branch=$(git branch --show-current 2>/dev/null || echo "detached")
   repo_name=$(get_repo_name)
   main_dir=$(get_main_repo_dir)
+  worktrees_dir=$(get_worktrees_dir)
 
   local is_main="false"
   local worktree_name=""
@@ -337,11 +355,12 @@ cmd_here() {
   fi
 
   if [[ "$JSON_OUTPUT" == "true" ]]; then
-    echo "{\"path\": \"$toplevel\", \"branch\": \"$branch\", \"is_main\": $is_main, \"name\": \"$worktree_name\"}"
+    echo "{\"path\": \"$toplevel\", \"branch\": \"$branch\", \"is_main\": $is_main, \"name\": \"$worktree_name\", \"worktrees_dir\": \"$worktrees_dir\"}"
   else
     echo "Repository: $repo_name"
     echo "Branch: $branch"
     echo "Path: $toplevel"
+    echo "Worktrees dir: $worktrees_dir"
     if [[ "$is_main" == "true" ]]; then
       echo "Type: main repository"
     else
@@ -396,6 +415,17 @@ Options:
   --json                Machine-readable JSON output
   --no-env              Skip copying .env files on new
   --keep-branch         Don't delete branch on rm
+
+Environment:
+  GWT_WORKTREE_DIR      Override worktrees directory (default: ../worktrees)
+
+Directory Structure:
+  ~/code/
+  ├── my-project/                    # main repo
+  ├── other-project/                 # another repo
+  └── worktrees/                     # all worktrees live here
+      ├── my-project--feat-auth/
+      └── other-project--fix-bug/
 
 Examples:
   gwt new feat/auth           Create worktree for feat/auth branch
