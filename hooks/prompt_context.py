@@ -107,7 +107,9 @@ def format_output(memories: list[dict]) -> tuple[str, str, list[str]]:
 
     if title and file_path:
         session_id = extract_session_id_from_path(file_path)
-        fork_msg = f'🔍 Similar session: "{title}" → claude --resume {session_id} --fork-session'
+        # Truncate long titles for terminal display
+        display_title = title[:50] + "..." if len(title) > 50 else title
+        fork_msg = f'🔍 Related: "{display_title}"\n  claude --resume {session_id} --fork-session'
         user_parts.append(fork_msg)
         context_parts.append(f"""SIMILAR PAST SESSION FOUND:
 "{title}"
