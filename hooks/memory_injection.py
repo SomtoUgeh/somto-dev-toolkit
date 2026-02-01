@@ -123,6 +123,28 @@ def get_shown_memories(session_id: str) -> set[str]:
         return set()
 
 
+def get_project_name() -> str:
+    """Extract project name from CLAUDE_PROJECT_DIR environment variable."""
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    if not project_dir:
+        return ""
+    return os.path.basename(project_dir.rstrip("/"))
+
+
+def filter_by_project(memories: list[dict], project_name: str) -> list[dict]:
+    """Filter results to current project only.
+
+    Session file paths contain project name: qmd://claude-sessions/{project_name}/...
+    This ensures context injection is project-scoped.
+    """
+    if not project_name:
+        return memories
+    return [
+        m for m in memories
+        if project_name in m.get("file", m.get("path", ""))
+    ]
+
+
 def add_shown_memories(session_id: str, doc_ids: list[str]) -> None:
     """Add doc IDs to shown memories."""
     shown_path = get_shown_path(session_id)
@@ -156,7 +178,7 @@ def query_qmd(thinking: str) -> list[dict]:
                 query,
                 "--json",
                 "-n",
-                str(MAX_RESULTS + 2),  # Get extra for dedup
+                str(MAX_RESULTS + 5),  # Extra for project filtering + dedup
                 "-c",
                 QMD_COLLECTION,
             ],
@@ -245,8 +267,14 @@ def main():
     if should_skip_query(session_id, thinking):
         sys.exit(0)
 
-    # Query qmd
+    # Query qmd (get extra for project filtering)
     memories = query_qmd(thinking)
+    if not memories:
+        sys.exit(0)
+
+    # Project-scope: only show sessions from current project
+    project_name = get_project_name()
+    memories = filter_by_project(memories, project_name)
     if not memories:
         sys.exit(0)
 

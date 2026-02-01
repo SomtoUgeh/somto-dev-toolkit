@@ -175,6 +175,28 @@ def filter_current_session(memories: list[dict], current_session_id: str) -> lis
     ]
 
 
+def get_project_name() -> str:
+    """Extract project name from CLAUDE_PROJECT_DIR environment variable."""
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    if not project_dir:
+        return ""
+    return os.path.basename(project_dir.rstrip("/"))
+
+
+def filter_by_project(memories: list[dict], project_name: str) -> list[dict]:
+    """Filter results to current project only.
+
+    Session file paths contain project name: qmd://claude-sessions/{project_name}/...
+    This ensures fork suggestions and context are project-scoped.
+    """
+    if not project_name:
+        return memories
+    return [
+        m for m in memories
+        if project_name in m.get("file", m.get("path", ""))
+    ]
+
+
 def main():
     try:
         input_data = json.load(sys.stdin)
@@ -186,13 +208,19 @@ def main():
         sys.exit(0)
 
     # Query for fork + memory (get extra to account for filtering)
-    memories = query_qmd(prompt, num_results=MAX_RESULTS + 2)
+    memories = query_qmd(prompt, num_results=MAX_RESULTS + 5)  # Extra for project filtering
     if not memories:
         sys.exit(0)
 
     # Skip current session to avoid self-referential context
     current_session_id = os.environ.get("CLAUDE_SESSION_ID", "")
     memories = filter_current_session(memories, current_session_id)
+    if not memories:
+        sys.exit(0)
+
+    # Project-scope: only show sessions from current project
+    project_name = get_project_name()
+    memories = filter_by_project(memories, project_name)
     if not memories:
         sys.exit(0)
 
