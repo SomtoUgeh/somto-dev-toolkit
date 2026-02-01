@@ -48,6 +48,23 @@ The hook uses **file existence as primary truth** (ralph-loop pattern). Markers 
 3. **Last marker wins** - If docs/examples contain markers, only the LAST occurrence counts
 4. **Auto-discovery** - Paths follow convention: `plans/<feature>/spec.md`
 
+### CRITICAL: Marker Placement
+
+**Phase markers MUST be the LAST thing in your response.** The stop hook reads only the final assistant message. If you output a marker then make a tool call, the marker won't be detected.
+
+Correct:
+```
+[Complete phase work]
+[Final summary text]
+<phase_complete phase="2"/>
+```
+
+Wrong:
+```
+<phase_complete phase="2"/>
+[Tool call after marker] ← Hook misses marker!
+```
+
 ### File-Based Auto-Advance
 
 | Phase | Auto-Advances When |
@@ -114,7 +131,17 @@ Task 7: subagent_type="compound-engineering:review:pattern-recognition-specialis
 
 #### Review Findings
 
-After agents complete, summarize key findings. If findings reveal gaps, ask 1-2 clarifying questions.
+After agents complete, summarize key findings briefly.
+
+**If findings reveal gaps:**
+1. Ask clarifying questions using AskUserQuestion
+2. Wait for user response
+3. THEN output the marker in your next response
+
+**If no gaps:**
+Output the marker immediately.
+
+**IMPORTANT:** The marker must be the LAST thing in your response with NO tool calls after it. If you need to ask questions, do that FIRST, then output the marker in your follow-up response after receiving answers.
 
 **Output:** `<phase_complete phase="2"/>`
 
@@ -178,43 +205,52 @@ Write comprehensive spec to `plans/<feature>/spec.md`. Include a structured stor
 - `web-animation-design` - Animations, transitions, easing, springs
 - `vercel-react-best-practices` - React performance, hooks, rendering
 
-**Output:** `<phase_complete phase="3" spec_path="plans/<feature>/spec.md"/>`
+**Marker:** After writing the spec file, output the marker with NO tool calls after it:
+```
+<phase_complete phase="3" spec_path="plans/<feature>/spec.md"/>
+```
 
 ### Phase 4: Dex Handoff
 
-Use `dex plan` to automatically create tasks from the spec's Implementation Stories section.
+Use `/dex-plan` to create tasks from the spec's Implementation Stories section.
 
 **Steps:**
 
-1. Create tasks from spec using `dex plan`:
-```bash
-dex plan plans/<feature>/spec.md
+1. Invoke the dex-plan skill with the spec file:
+```
+/dex-plan plans/<feature>/spec.md
 ```
 
 This automatically:
 - Creates parent task from spec title
 - Analyzes Implementation Stories section
-- Generates subtasks with proper hierarchy
-- Sets blocked-by relationships from "Blocked by:" lines
+- Creates subtasks for each story with context
+- Reports task IDs and structure
 
-2. Verify tasks created:
+2. Add blocked-by relationships if needed:
+```bash
+# If stories have dependencies (from "Blocked by:" in spec):
+dex edit <story2-id> --add-blocker <story1-id>
+```
+
+3. Verify tasks created:
 ```bash
 dex status
 dex list
 ```
 
-3. Use AskUserQuestion:
-"PRD complete! Dex tasks created from spec:
-- `plans/<feature>/spec.md`
-- <N> tasks ready for implementation
-
-What next?"
+4. Ask user what's next using AskUserQuestion:
+"PRD complete! Dex tasks created. What next?"
 
 Options:
 - **Start first task** - Begin implementation
 - **Done** - Review PRD first, implement later
 
-**Output:** `<phase_complete phase="4"/>` or `<promise>PRD COMPLETE</promise>`
+5. **AFTER user responds**, output the completion marker:
+- If "Done": Output `<promise>PRD COMPLETE</promise>`
+- If "Start first task": Output `<phase_complete phase="4"/>` then begin implementation
+
+**IMPORTANT:** The marker/promise must be output AFTER the AskUserQuestion response, not before. The marker must be the LAST thing in your response with NO tool calls after it.
 
 ---
 

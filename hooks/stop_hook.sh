@@ -303,13 +303,17 @@ fi
 # =============================================================================
 TRANSCRIPT_PATH=$(echo "$HOOK_INPUT" | jq -r '.transcript_path')
 
+# Check last 3 assistant messages for markers (handles tool-only final messages)
+# The "last marker wins" logic in extract_regex_last handles examples in earlier messages
 LAST_OUTPUT=""
 if [[ -f "$TRANSCRIPT_PATH" ]] && grep -Eq '"role"[[:space:]]*:[[:space:]]*"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null; then
-  LAST_LINE=$(grep -E '"role"[[:space:]]*:[[:space:]]*"assistant"' "$TRANSCRIPT_PATH" | tail -1)
-  if [[ -n "$LAST_LINE" ]]; then
+  # Get last 3 assistant messages to handle cases where final message is tool-only
+  RECENT_MESSAGES=$(grep -E '"role"[[:space:]]*:[[:space:]]*"assistant"' "$TRANSCRIPT_PATH" | tail -3)
+  if [[ -n "$RECENT_MESSAGES" ]]; then
     set +e
-    JQ_RESULT=$(printf '%s' "$LAST_LINE" | jq -r '
-      .message.content |
+    JQ_RESULT=$(printf '%s' "$RECENT_MESSAGES" | jq -rs '
+      [.[].message.content // []] |
+      flatten |
       map(select(.type == "text")) |
       map(.text) |
       join("\n")
