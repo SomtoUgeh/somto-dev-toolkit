@@ -54,16 +54,6 @@
             "timeout": 5
           }
         ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/prd_schema_validator.py",
-            "timeout": 5
-          }
-        ]
       }
     ],
     "UserPromptSubmit": [
