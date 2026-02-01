@@ -153,10 +153,16 @@ def main():
         session_id = os.environ.get("CLAUDE_SESSION_ID", "")
         add_shown_memories(session_id, doc_ids)
 
-        # Plain text stdout is "shown as hook output in the transcript" per docs
-        # This is the most reliable way to display to user from UserPromptSubmit
+        # Output JSON with both fields:
+        # - systemMessage: shown to user in transcript
+        # - additionalContext: injected to Claude discretely
+        output = {}
         if user_message:
-            print(user_message)
+            output["systemMessage"] = user_message
+        if claude_context:
+            output["additionalContext"] = claude_context
+        if output:
+            print(json.dumps(output))
 
     sys.exit(0)
 
