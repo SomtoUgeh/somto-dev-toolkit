@@ -84,7 +84,7 @@ def extract_session_id_from_path(file_path: str) -> str:
     return os.path.basename(file_path).replace(".md", "")
 
 
-def fetch_full_content(file_path: str, max_lines: int = 150) -> str:
+def fetch_full_content(file_path: str, max_lines: int = 75) -> str:
     """Fetch full session content using qmd get."""
     try:
         result = subprocess.run(
@@ -165,6 +165,16 @@ To fork: claude --resume {session_id} --fork-session""")
     return "\n".join(user_parts), "\n".join(context_parts), doc_ids
 
 
+def filter_current_session(memories: list[dict], current_session_id: str) -> list[dict]:
+    """Remove current session from results to avoid self-referential matches."""
+    if not current_session_id:
+        return memories
+    return [
+        m for m in memories
+        if current_session_id not in m.get("file", m.get("path", ""))
+    ]
+
+
 def main():
     try:
         input_data = json.load(sys.stdin)
@@ -175,8 +185,14 @@ def main():
     if len(prompt) < MIN_PROMPT_LENGTH:
         sys.exit(0)
 
-    # Query for fork + memory (get extra for both purposes)
-    memories = query_qmd(prompt, num_results=MAX_RESULTS + 1)
+    # Query for fork + memory (get extra to account for filtering)
+    memories = query_qmd(prompt, num_results=MAX_RESULTS + 2)
+    if not memories:
+        sys.exit(0)
+
+    # Skip current session to avoid self-referential context
+    current_session_id = os.environ.get("CLAUDE_SESSION_ID", "")
+    memories = filter_current_session(memories, current_session_id)
     if not memories:
         sys.exit(0)
 
