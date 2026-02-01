@@ -83,42 +83,38 @@ Classify input type (empty/file/folder/idea) and extract feature context.
 
 ### Phase 2: Interview + Exploration
 
-**Commitment:** "I will ask 8-10+ questions covering: core problem, success criteria, MVP scope, technical constraints, UX flows, edge cases, error states, and tradeoffs. I will spawn ALL research and expert agents after Wave 1."
+**Commitment:** "I will ask 8-10+ questions covering: core problem, success criteria, MVP scope, technical constraints, UX flows, edge cases, error states, and tradeoffs. After interview, I will run research and expert agents to inform the spec."
 
-Conduct thorough interview using AskUserQuestion tool. Interview in waves while research runs in background:
+Conduct thorough interview using AskUserQuestion tool:
 
-#### Wave 1 (3-4 questions): Core problem, success criteria, MVP scope
+#### Interview (8-10+ questions across these areas):
+- **Core** - Problem statement, success criteria, MVP scope
+- **Technical** - Systems, data models, existing patterns
+- **UX/UI** - User flows, error states, edge cases
+- **Tradeoffs** - Compromises, priorities, constraints
 
-After Wave 1, spawn ALL agents IN PARALLEL with `run_in_background: true` (single message, multiple Task calls):
+#### After Interview Complete, Run Agents (blocking)
+
+Spawn ALL agents IN PARALLEL (single message, multiple Task calls). User waits ~2-3 min while agents research.
 
 **Research Agents:**
 ```
-Task 1: subagent_type="somto-dev-toolkit:prd-codebase-researcher" (max_turns: 30, run_in_background: true)
-Task 2: subagent_type="compound-engineering:research:git-history-analyzer" (max_turns: 30, run_in_background: true)
-Task 3: subagent_type="somto-dev-toolkit:prd-external-researcher" (max_turns: 15, run_in_background: true)
+Task 1: subagent_type="somto-dev-toolkit:prd-codebase-researcher" (max_turns: 30)
+Task 2: subagent_type="compound-engineering:research:git-history-analyzer" (max_turns: 30)
+Task 3: subagent_type="somto-dev-toolkit:prd-external-researcher" (max_turns: 15)
 ```
 
-**Expert Agents (inform spec early):**
+**Expert Agents:**
 ```
-Task 4: subagent_type="compound-engineering:review:architecture-strategist" (max_turns: 20, run_in_background: true)
-Task 5: subagent_type="compound-engineering:review:security-sentinel" (max_turns: 20, run_in_background: true)
-Task 6: subagent_type="compound-engineering:workflow:spec-flow-analyzer" (max_turns: 20, run_in_background: true)
-Task 7: subagent_type="compound-engineering:review:pattern-recognition-specialist" (max_turns: 20, run_in_background: true)
+Task 4: subagent_type="compound-engineering:review:architecture-strategist" (max_turns: 20)
+Task 5: subagent_type="compound-engineering:review:security-sentinel" (max_turns: 20)
+Task 6: subagent_type="compound-engineering:workflow:spec-flow-analyzer" (max_turns: 20)
+Task 7: subagent_type="compound-engineering:review:pattern-recognition-specialist" (max_turns: 20)
 ```
 
-#### Waves 2-5: Continue interview, incorporate agent findings as they complete
+#### Review Findings
 
-**Check progress:** `/tasks` or `Ctrl+T` to see status. Use `TaskOutput` to retrieve results when ready.
-
-Continue asking questions across:
-- **Wave 2** - Technical deep dive (systems, data models, patterns)
-- **Wave 3** - UX/UI details (flows, error states)
-- **Wave 4** - Edge cases & concerns (failures, security)
-- **Wave 5** - Tradeoffs & decisions (compromises, priorities)
-
-Incorporate agent findings into your questions. Architecture concerns? Ask about them. Security issues? Clarify with user.
-
-**After 8-10+ questions and agent findings incorporated:**
+After agents complete, summarize key findings. If findings reveal gaps, ask 1-2 clarifying questions.
 
 **Output:** `<phase_complete phase="2"/>`
 

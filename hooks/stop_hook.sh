@@ -546,32 +546,34 @@ Classify input and extract feature context.
 
 ## Your Task
 
-Conduct thorough interview (8-10+ questions) while research agents run in background.
+Conduct thorough interview (8-10+ questions) covering:
+- Core problem, success criteria, MVP scope
+- Technical systems, data models, existing patterns
+- UX/UI flows, error states, edge cases
+- Tradeoffs, compromises, priorities
 
-### Wave 1 (3-4 questions): Core problem, success criteria, MVP scope
+### After Interview Complete, Run Agents (blocking)
 
-After Wave 1, spawn ALL agents IN PARALLEL with \`run_in_background: true\`:
+Spawn ALL agents IN PARALLEL (single message, multiple Task calls):
 
 **Research Agents:**
 \`\`\`
-Task 1: subagent_type=\"somto-dev-toolkit:prd-codebase-researcher\" (max_turns: 30, run_in_background: true)
-Task 2: subagent_type=\"compound-engineering:research:git-history-analyzer\" (max_turns: 30, run_in_background: true)
-Task 3: subagent_type=\"somto-dev-toolkit:prd-external-researcher\" (max_turns: 15, run_in_background: true)
+Task 1: subagent_type=\"somto-dev-toolkit:prd-codebase-researcher\" (max_turns: 30)
+Task 2: subagent_type=\"compound-engineering:research:git-history-analyzer\" (max_turns: 30)
+Task 3: subagent_type=\"somto-dev-toolkit:prd-external-researcher\" (max_turns: 15)
 \`\`\`
 
-**Expert Agents (inform spec early):**
+**Expert Agents:**
 \`\`\`
-Task 4: subagent_type=\"compound-engineering:review:architecture-strategist\" (max_turns: 20, run_in_background: true)
-Task 5: subagent_type=\"compound-engineering:review:security-sentinel\" (max_turns: 20, run_in_background: true)
-Task 6: subagent_type=\"compound-engineering:workflow:spec-flow-analyzer\" (max_turns: 20, run_in_background: true)
-Task 7: subagent_type=\"compound-engineering:review:pattern-recognition-specialist\" (max_turns: 20, run_in_background: true)
+Task 4: subagent_type=\"compound-engineering:review:architecture-strategist\" (max_turns: 20)
+Task 5: subagent_type=\"compound-engineering:review:security-sentinel\" (max_turns: 20)
+Task 6: subagent_type=\"compound-engineering:workflow:spec-flow-analyzer\" (max_turns: 20)
+Task 7: subagent_type=\"compound-engineering:review:pattern-recognition-specialist\" (max_turns: 20)
 \`\`\`
 
-### Waves 2-5: Continue interview, incorporate agent findings
+### Review Findings
 
-Check progress with \`/tasks\` or \`Ctrl+T\`.
-
-**After 8-10+ questions and agent findings incorporated:**
+Summarize key findings. Ask 1-2 clarifying questions if gaps revealed.
 
 **Output:** \`<phase_complete phase=\"2\"/>\`"
           ;;

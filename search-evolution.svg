@@ -1,0 +1,111 @@
+<svg viewBox="0 0 700 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e5e5e5" stroke-width="0.5"/>
+    </pattern>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#ccc"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#e74c3c"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#27ae60"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="700" height="520" fill="#fafafa"/>
+  <rect width="700" height="520" fill="url(#grid)"/>
+
+  <!-- Title -->
+  <text x="40" y="35" font-family="monospace" font-size="14" fill="#333" font-weight="bold">SEARCH_EVOLUTION</text>
+  <text x="210" y="35" font-family="monospace" font-size="12" fill="#888">[ ITERATION_JOURNEY ]</text>
+
+  <!-- Timeline line -->
+  <line x1="60" y1="70" x2="60" y2="480" stroke="#e0e0e0" stroke-width="2"/>
+
+  <!-- ATTEMPT 1 -->
+  <circle cx="60" cy="100" r="8" fill="#e74c3c"/>
+  <text x="85" y="105" font-family="monospace" font-size="11" fill="#e74c3c" font-weight="bold">ATTEMPT_1</text>
+  <text x="175" y="105" font-family="monospace" font-size="9" fill="#999">semantic search</text>
+
+  <rect x="100" y="120" width="550" height="85" fill="none" stroke="#e74c3c" stroke-width="1.5" stroke-dasharray="4,3" rx="4"/>
+
+  <!-- Flow -->
+  <rect x="120" y="140" width="100" height="40" fill="#fff" stroke="#ccc" stroke-width="1.5" rx="3"/>
+  <text x="170" y="158" font-family="monospace" font-size="8" fill="#666" text-anchor="middle">raw thinking</text>
+  <text x="170" y="170" font-family="monospace" font-size="7" fill="#999" text-anchor="middle">(paragraphs)</text>
+
+  <path d="M 225 160 L 280 160" stroke="#ccc" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+
+  <rect x="290" y="140" width="100" height="40" fill="#fff" stroke="#e74c3c" stroke-width="1.5" rx="3"/>
+  <text x="340" y="158" font-family="monospace" font-size="8" fill="#e74c3c" text-anchor="middle">qmd vsearch</text>
+  <text x="340" y="170" font-family="monospace" font-size="7" fill="#999" text-anchor="middle">(semantic)</text>
+
+  <path d="M 395 160 L 450 160" stroke="#e74c3c" stroke-width="1.5" fill="none" marker-end="url(#arrowRed)"/>
+
+  <rect x="460" y="135" width="170" height="50" fill="#fff" stroke="#e74c3c" stroke-width="2" rx="3"/>
+  <text x="545" y="155" font-family="monospace" font-size="10" fill="#e74c3c" text-anchor="middle" font-weight="bold">FAILED</text>
+  <text x="545" y="172" font-family="monospace" font-size="8" fill="#999" text-anchor="middle">60s cold start · too slow</text>
+
+  <!-- Learning 1 -->
+  <text x="120" y="195" font-family="monospace" font-size="8" fill="#666" font-style="italic">lesson: embedding models need warmup, hooks need &lt;5s response</text>
+
+  <!-- ATTEMPT 2 -->
+  <circle cx="60" cy="240" r="8" fill="#e74c3c"/>
+  <text x="85" y="245" font-family="monospace" font-size="11" fill="#e74c3c" font-weight="bold">ATTEMPT_2</text>
+  <text x="175" y="245" font-family="monospace" font-size="9" fill="#999">keyword search</text>
+
+  <rect x="100" y="260" width="550" height="85" fill="none" stroke="#e74c3c" stroke-width="1.5" stroke-dasharray="4,3" rx="4"/>
+
+  <!-- Flow -->
+  <rect x="120" y="280" width="100" height="40" fill="#fff" stroke="#ccc" stroke-width="1.5" rx="3"/>
+  <text x="170" y="298" font-family="monospace" font-size="8" fill="#666" text-anchor="middle">raw thinking</text>
+  <text x="170" y="310" font-family="monospace" font-size="7" fill="#999" text-anchor="middle">(paragraphs)</text>
+
+  <path d="M 225 300 L 280 300" stroke="#ccc" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+
+  <rect x="290" y="280" width="100" height="40" fill="#fff" stroke="#3498db" stroke-width="1.5" rx="3"/>
+  <text x="340" y="298" font-family="monospace" font-size="8" fill="#3498db" text-anchor="middle">qmd search</text>
+  <text x="340" y="310" font-family="monospace" font-size="7" fill="#999" text-anchor="middle">(BM25)</text>
+
+  <path d="M 395 300 L 450 300" stroke="#e74c3c" stroke-width="1.5" fill="none" marker-end="url(#arrowRed)"/>
+
+  <rect x="460" y="275" width="170" height="50" fill="#fff" stroke="#e74c3c" stroke-width="2" rx="3"/>
+  <text x="545" y="295" font-family="monospace" font-size="10" fill="#e74c3c" text-anchor="middle" font-weight="bold">FAILED</text>
+  <text x="545" y="312" font-family="monospace" font-size="8" fill="#999" text-anchor="middle">long queries dilute scores</text>
+
+  <!-- Learning 2 -->
+  <text x="120" y="335" font-family="monospace" font-size="8" fill="#666" font-style="italic">lesson: BM25 needs focused terms, not full paragraphs</text>
+
+  <!-- ATTEMPT 3 (Success) -->
+  <circle cx="60" cy="380" r="8" fill="#27ae60"/>
+  <text x="85" y="385" font-family="monospace" font-size="11" fill="#27ae60" font-weight="bold">SOLUTION</text>
+  <text x="170" y="385" font-family="monospace" font-size="9" fill="#999">keyword extraction + BM25</text>
+
+  <rect x="100" y="400" width="550" height="75" fill="none" stroke="#27ae60" stroke-width="1.5" rx="4"/>
+
+  <!-- Flow -->
+  <rect x="120" y="420" width="90" height="35" fill="#fff" stroke="#ccc" stroke-width="1.5" rx="3"/>
+  <text x="165" y="442" font-family="monospace" font-size="8" fill="#666" text-anchor="middle">thinking</text>
+
+  <path d="M 215 437 L 250 437" stroke="#27ae60" stroke-width="1.5" fill="none" marker-end="url(#arrowGreen)"/>
+
+  <rect x="260" y="420" width="90" height="35" fill="#fff" stroke="#9b59b6" stroke-width="1.5" rx="3"/>
+  <text x="305" y="442" font-family="monospace" font-size="8" fill="#9b59b6" text-anchor="middle">YAKE</text>
+
+  <path d="M 355 437 L 390 437" stroke="#27ae60" stroke-width="1.5" fill="none" marker-end="url(#arrowGreen)"/>
+
+  <rect x="400" y="420" width="90" height="35" fill="#fff" stroke="#3498db" stroke-width="1.5" rx="3"/>
+  <text x="445" y="442" font-family="monospace" font-size="8" fill="#3498db" text-anchor="middle">BM25</text>
+
+  <path d="M 495 437 L 530 437" stroke="#27ae60" stroke-width="1.5" fill="none" marker-end="url(#arrowGreen)"/>
+
+  <rect x="540" y="415" width="95" height="45" fill="#fff" stroke="#27ae60" stroke-width="2" rx="3"/>
+  <text x="587" y="435" font-family="monospace" font-size="10" fill="#27ae60" text-anchor="middle" font-weight="bold">SUCCESS</text>
+  <text x="587" y="450" font-family="monospace" font-size="7" fill="#999" text-anchor="middle">&lt;5s · relevant</text>
+
+  <!-- Bottom note -->
+  <text x="350" y="500" font-family="monospace" font-size="10" fill="#999" text-anchor="middle">each failure taught something · iteration led to the right architecture</text>
+</svg>

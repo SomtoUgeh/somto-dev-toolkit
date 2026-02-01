@@ -30,11 +30,11 @@ implementable stories through structured interview, research, and specification.
 | Phase | Name | Purpose |
 |-------|------|---------|
 | 1 | Input Classification | Identify feature name and type |
-| 2 | Interview + Exploration | Gather requirements while research/expert agents run in parallel |
+| 2 | Interview + Exploration | Gather requirements, then run research/expert agents |
 | 3 | Spec Write | Create specification with Implementation Stories section |
 | 4 | Dex Handoff | Parse stories into Dex tasks |
 
-**Key Change:** Research and expert agents now run during interview (Phase 2), not after the spec. This produces better specs from the start.
+**Key Change:** Research and expert agents run after interview completes (blocking). Findings are reviewed before spec writing.
 
 ## Starting the Workflow
 
@@ -48,26 +48,34 @@ implementable stories through structured interview, research, and specification.
 
 **Commitment:** "I will ask 8-10+ questions covering: core problem, success criteria, MVP scope, technical constraints, UX flows, edge cases, error states, and tradeoffs."
 
-### Wave 1 (3-4 questions)
-Core problem, success criteria, MVP scope.
+### Interview (8-10+ questions)
 
-After Wave 1, spawn ALL agents in parallel with `run_in_background: true`:
+Cover these areas:
+- Core problem, success criteria, MVP scope
+- Technical systems, data models, existing patterns
+- UX/UI flows, error states, edge cases
+- Tradeoffs, compromises, priorities
+
+Focus on **non-obvious** details that will bite during implementation.
+
+### After Interview, Run Agents (blocking)
+
+Spawn ALL agents in parallel (user waits ~2-3 min):
 
 **Research Agents:**
 - `prd-codebase-researcher` - Existing patterns, files to modify
 - `git-history-analyzer` - Prior attempts, why patterns evolved
 - `prd-external-researcher` - Best practices, code examples
 
-**Expert Agents (inform spec early):**
+**Expert Agents:**
 - `architecture-strategist` - System design concerns
 - `security-sentinel` - Auth, data exposure risks
 - `spec-flow-analyzer` - User journeys, missing flows
 - `pattern-recognition-specialist` - Codebase consistency
 
-### Waves 2-5
-Continue interview, incorporate agent findings as they complete.
+### Review Findings
 
-Focus on **non-obvious** details - edge cases, error states, and tradeoffs that will bite during implementation.
+Summarize key findings. Ask clarifying questions if gaps revealed.
 
 ## Phase 3: Spec Structure
 
