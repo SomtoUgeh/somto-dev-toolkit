@@ -84,6 +84,22 @@ def extract_session_id_from_path(file_path: str) -> str:
     return os.path.basename(file_path).replace(".md", "")
 
 
+def fetch_full_content(file_path: str, max_lines: int = 150) -> str:
+    """Fetch full session content using qmd get."""
+    try:
+        result = subprocess.run(
+            ["qmd", "get", file_path, "-l", str(max_lines)],
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return ""
+
+
 def format_output(memories: list[dict]) -> tuple[str, str, list[str]]:
     """Format combined output: fork suggestion (first) + memory context (rest).
 
@@ -99,7 +115,7 @@ def format_output(memories: list[dict]) -> tuple[str, str, list[str]]:
     context_parts = []
     doc_ids = []
 
-    # First result: fork suggestion (shown to user AND Claude)
+    # First result: fork suggestion + FULL CONTENT (shown to user AND Claude)
     first = memories[0]
     title = first.get("title", first.get("path", ""))
     file_path = first.get("file", first.get("path", ""))
@@ -111,30 +127,39 @@ def format_output(memories: list[dict]) -> tuple[str, str, list[str]]:
         display_title = title[:50] + "..." if len(title) > 50 else title
         fork_msg = f'🔍 Related: "{display_title}"\n  claude --resume {session_id} --fork-session'
         user_parts.append(fork_msg)
-        context_parts.append(f"""SIMILAR PAST SESSION FOUND:
+
+        # Fetch full content for the best match
+        full_content = fetch_full_content(file_path)
+        if full_content:
+            context_parts.append(f"""📖 MOST RELEVANT PAST SESSION:
+"{title}"
+Session ID: {session_id}
+To fork: claude --resume {session_id} --fork-session
+
+--- SESSION CONTENT ---
+{full_content}
+--- END SESSION ---""")
+        else:
+            context_parts.append(f"""SIMILAR PAST SESSION FOUND:
 "{title}"
 Session ID: {session_id}
 To fork: claude --resume {session_id} --fork-session""")
         doc_ids.append(doc_id)
 
-    # Remaining results: memory context (Claude only, not shown to user)
+    # Remaining results: snippets only (to save tokens)
     if len(memories) > 1:
-        context_parts.append("\n📚 ADDITIONAL RELEVANT SESSIONS:")
+        context_parts.append("\n📚 OTHER RELEVANT SESSIONS (snippets):")
         for mem in memories[1:MAX_RESULTS + 1]:
             mem_file = mem.get("file", mem.get("path", ""))
-            title = mem.get("title", mem_file)
+            mem_title = mem.get("title", mem_file)
             snippet = mem.get("snippet", "")[:200].replace("\n", " ")
             doc_id = mem.get("id", mem_file)
-            if not title:
+            if not mem_title:
                 continue
-            context_parts.append(f"\n• {title}")
+            context_parts.append(f"\n• {mem_title}")
             context_parts.append(f"  File: {mem_file}")
             if snippet:
                 context_parts.append(f"  {snippet}...")
-
-    # Add instruction for fetching full content
-    if memories:
-        context_parts.append("\n💡 To get full session content: qmd get <file> -l 200")
             doc_ids.append(doc_id)
 
     return "\n".join(user_parts), "\n".join(context_parts), doc_ids
