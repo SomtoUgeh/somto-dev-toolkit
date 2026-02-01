@@ -153,14 +153,17 @@ def main():
         session_id = os.environ.get("CLAUDE_SESSION_ID", "")
         add_shown_memories(session_id, doc_ids)
 
-        # Output JSON with both fields:
-        # - systemMessage: shown to user in transcript
-        # - additionalContext: injected to Claude discretely
+        # Output JSON per hook docs:
+        # - systemMessage (top-level): shown to user
+        # - additionalContext (in hookSpecificOutput): injected to Claude
         output = {}
         if user_message:
             output["systemMessage"] = user_message
         if claude_context:
-            output["additionalContext"] = claude_context
+            output["hookSpecificOutput"] = {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": claude_context,
+            }
         if output:
             print(json.dumps(output))
 
