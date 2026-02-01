@@ -12,7 +12,7 @@
       "name": "somto-dev-toolkit",
       "source": "./",
       "description": "Personal collection of Claude Code tools and skills",
-      "version": "1.4.28",
+      "version": "1.4.29",
       "author": {
         "name": "Somto Odera"
       },
@@ -36,7 +36,9 @@
         "ralph",
         "qmd",
         "session-memory",
-        "fork-suggest"
+        "fork-suggest",
+        "gwt",
+        "worktree"
       ]
     }
   ]

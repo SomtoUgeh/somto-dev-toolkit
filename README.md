@@ -9,7 +9,7 @@ Personal collection of Claude Code tools and skills.
 /plugin install somto-dev-toolkit@somto-dev-toolkit
 ```
 
-## Commands (13)
+## Commands (15)
 
 ### Loop Commands
 
@@ -44,6 +44,8 @@ Personal collection of Claude Code tools and skills.
 | `/setup-memory` | Setup smart session memory system |
 | `/deslop` | Remove AI-generated code slop from branch |
 | `/setup-git-guard` | Install git safety guard hook |
+| `/gwt` | Manage git worktrees using sibling directories |
+| `/setup-gwt` | Install the gwt script |
 
 ## Agents (3)
 
@@ -53,13 +55,14 @@ Personal collection of Claude Code tools and skills.
 | `prd-external-researcher` | Research external best practices using Exa |
 | `prd-complexity-estimator` | Estimate iteration counts for /go loops |
 
-## Skills (3)
+## Skills (4)
 
 | Skill | Description |
 |-------|-------------|
 | `blog-post-writer` | Transform brain dumps into polished blog posts |
 | `technical-svg-diagrams` | Generate clean, minimal SVG diagrams |
 | `biome-gritql` | GritQL patterns for Biome linting |
+| `gwt` | Git worktree management using sibling directories |
 
 ## Hooks (6)
 

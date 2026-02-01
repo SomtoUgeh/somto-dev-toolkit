@@ -1,0 +1,483 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Git Worktree Manager (gwt)
+# Uses sibling directories to avoid Turbopack/IDE conflicts
+
+VERSION="1.0.0"
+SEPARATOR="--"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Flags
+JSON_OUTPUT=false
+COPY_ENV=true
+KEEP_BRANCH=false
+
+#
+# Utility Functions
+#
+
+die() {
+  echo -e "${RED}error:${NC} $1" >&2
+  exit 1
+}
+
+info() {
+  if [[ "$JSON_OUTPUT" == "false" ]]; then
+    echo -e "${BLUE}→${NC} $1"
+  fi
+}
+
+success() {
+  if [[ "$JSON_OUTPUT" == "false" ]]; then
+    echo -e "${GREEN}✓${NC} $1"
+  fi
+}
+
+warn() {
+  if [[ "$JSON_OUTPUT" == "false" ]]; then
+    echo -e "${YELLOW}!${NC} $1"
+  fi
+}
+
+# Get the repo name from directory (not remote, for consistency with filesystem)
+get_repo_name() {
+  local main_dir
+  main_dir=$(get_main_repo_dir)
+  basename "$main_dir"
+}
+
+# Get the main repo directory (handles being inside a worktree)
+get_main_repo_dir() {
+  local toplevel git_common_dir
+  toplevel=$(git rev-parse --show-toplevel)
+  git_common_dir=$(git rev-parse --git-common-dir)
+
+  # If we're in a worktree, git-common-dir points to main repo's .git
+  if [[ "$git_common_dir" != ".git" && "$git_common_dir" != "$toplevel/.git" ]]; then
+    # We're in a worktree; common dir is like /path/to/main/.git
+    dirname "$git_common_dir"
+  else
+    echo "$toplevel"
+  fi
+}
+
+# Get parent directory where worktrees live
+get_parent_dir() {
+  dirname "$(get_main_repo_dir)"
+}
+
+# Compute worktree path for a branch
+get_worktree_path() {
+  local branch="$1"
+  local repo_name parent_dir
+  repo_name=$(get_repo_name)
+  parent_dir=$(get_parent_dir)
+
+  # Sanitize branch name (replace / with -)
+  local sanitized_branch
+  sanitized_branch=$(echo "$branch" | tr '/' '-')
+
+  echo "${parent_dir}/${repo_name}${SEPARATOR}${sanitized_branch}"
+}
+
+# Copy .env files from main repo to worktree
+copy_env_files() {
+  local main_dir="$1"
+  local worktree_dir="$2"
+
+  local count=0
+  for env_file in "$main_dir"/.env*; do
+    if [[ -f "$env_file" ]]; then
+      local basename
+      basename=$(basename "$env_file")
+      cp "$env_file" "$worktree_dir/$basename"
+      ((count++))
+    fi
+  done
+
+  if [[ $count -gt 0 ]]; then
+    info "Copied $count .env file(s)"
+  fi
+}
+
+# Find worktree by partial branch match
+find_worktree_by_branch() {
+  local search="$1"
+  local repo_name
+  repo_name=$(get_repo_name)
+
+  # List all worktrees and find matching one
+  local matches=()
+  while IFS= read -r line; do
+    local path branch
+    path=$(echo "$line" | awk '{print $1}')
+    branch=$(echo "$line" | awk '{print $3}' | tr -d '[]')
+
+    # Check if this worktree belongs to our repo (sibling pattern)
+    local dir_name
+    dir_name=$(basename "$path")
+
+    if [[ "$dir_name" == "${repo_name}${SEPARATOR}"* ]]; then
+      # Extract branch suffix
+      local suffix="${dir_name#${repo_name}${SEPARATOR}}"
+      if [[ "$suffix" == *"$search"* || "$branch" == *"$search"* ]]; then
+        matches+=("$path")
+      fi
+    fi
+  done < <(git worktree list 2>/dev/null)
+
+  if [[ ${#matches[@]} -eq 0 ]]; then
+    echo ""
+  elif [[ ${#matches[@]} -eq 1 ]]; then
+    echo "${matches[0]}"
+  else
+    # Multiple matches, prefer exact match
+    for m in "${matches[@]}"; do
+      local suffix
+      suffix=$(basename "$m")
+      suffix="${suffix#${repo_name}${SEPARATOR}}"
+      if [[ "$suffix" == "$search" ]]; then
+        echo "$m"
+        return
+      fi
+    done
+    # Return first match if no exact match
+    echo "${matches[0]}"
+  fi
+}
+
+#
+# Commands
+#
+
+cmd_new() {
+  local branch="${1:-}"
+  local from_ref="${2:-HEAD}"
+
+  [[ -z "$branch" ]] && die "Usage: gwt new <branch> [from]"
+
+  local main_dir worktree_path
+  main_dir=$(get_main_repo_dir)
+  worktree_path=$(get_worktree_path "$branch")
+
+  # Check if worktree already exists
+  if [[ -d "$worktree_path" ]]; then
+    die "Worktree already exists: $worktree_path"
+  fi
+
+  # Check if branch exists
+  if git show-ref --verify --quiet "refs/heads/$branch"; then
+    info "Using existing branch: $branch"
+    git worktree add "$worktree_path" "$branch"
+  else
+    info "Creating new branch: $branch from $from_ref"
+    git worktree add -b "$branch" "$worktree_path" "$from_ref"
+  fi
+
+  # Copy .env files if enabled
+  if [[ "$COPY_ENV" == "true" ]]; then
+    copy_env_files "$main_dir" "$worktree_path"
+  fi
+
+  if [[ "$JSON_OUTPUT" == "true" ]]; then
+    echo "{\"path\": \"$worktree_path\", \"branch\": \"$branch\"}"
+  else
+    success "Created worktree at: $worktree_path"
+    echo ""
+    echo "To switch:"
+    echo "  cd $worktree_path"
+    echo ""
+    echo "Then install dependencies:"
+    echo "  bun install"
+  fi
+}
+
+cmd_ls() {
+  local repo_name
+  repo_name=$(get_repo_name)
+
+  local worktrees=()
+  local main_path=""
+
+  while IFS= read -r line; do
+    local path branch bare
+    path=$(echo "$line" | awk '{print $1}')
+    branch=$(echo "$line" | awk '{print $3}' | tr -d '[]')
+    bare=$(echo "$line" | grep -c "bare" || true)
+
+    if [[ "$bare" -gt 0 ]]; then
+      continue
+    fi
+
+    local dir_name
+    dir_name=$(basename "$path")
+
+    # Check if this is our repo's worktree or main repo
+    if [[ "$dir_name" == "$repo_name" ]]; then
+      main_path="$path"
+      worktrees+=("main|$path|$branch")
+    elif [[ "$dir_name" == "${repo_name}${SEPARATOR}"* ]]; then
+      local suffix="${dir_name#${repo_name}${SEPARATOR}}"
+      worktrees+=("$suffix|$path|$branch")
+    fi
+  done < <(git worktree list 2>/dev/null)
+
+  if [[ "$JSON_OUTPUT" == "true" ]]; then
+    echo "["
+    local first=true
+    for w in "${worktrees[@]}"; do
+      IFS='|' read -r name path branch <<< "$w"
+      [[ "$first" == "true" ]] || echo ","
+      first=false
+      echo "  {\"name\": \"$name\", \"path\": \"$path\", \"branch\": \"$branch\"}"
+    done
+    echo "]"
+  else
+    if [[ ${#worktrees[@]} -eq 0 ]]; then
+      echo "No worktrees found for $repo_name"
+      return
+    fi
+
+    echo "Worktrees for $repo_name:"
+    echo ""
+    for w in "${worktrees[@]}"; do
+      IFS='|' read -r name path branch <<< "$w"
+      local current=""
+      if [[ "$path" == "$(git rev-parse --show-toplevel 2>/dev/null)" ]]; then
+        current=" ${GREEN}(current)${NC}"
+      fi
+      echo -e "  ${BLUE}$name${NC} → $branch$current"
+      echo "    $path"
+    done
+  fi
+}
+
+cmd_go() {
+  local search="${1:-}"
+
+  [[ -z "$search" ]] && die "Usage: gwt go <branch>"
+
+  # Special case: "main" refers to the main repo
+  if [[ "$search" == "main" ]]; then
+    get_main_repo_dir
+    return
+  fi
+
+  local path
+  path=$(find_worktree_by_branch "$search")
+
+  if [[ -z "$path" ]]; then
+    die "No worktree found matching: $search"
+  fi
+
+  echo "$path"
+}
+
+cmd_path() {
+  cmd_go "$@"
+}
+
+cmd_rm() {
+  local search="${1:-}"
+
+  [[ -z "$search" ]] && die "Usage: gwt rm <branch>"
+
+  local path
+  path=$(find_worktree_by_branch "$search")
+
+  if [[ -z "$path" ]]; then
+    die "No worktree found matching: $search"
+  fi
+
+  # Get branch name
+  local branch
+  branch=$(git -C "$path" branch --show-current 2>/dev/null || echo "")
+
+  info "Removing worktree: $path"
+  git worktree remove "$path" --force
+
+  if [[ "$KEEP_BRANCH" == "false" && -n "$branch" ]]; then
+    info "Deleting branch: $branch"
+    git branch -D "$branch" 2>/dev/null || warn "Could not delete branch $branch"
+  fi
+
+  if [[ "$JSON_OUTPUT" == "true" ]]; then
+    echo "{\"removed\": \"$path\", \"branch\": \"$branch\"}"
+  else
+    success "Removed worktree"
+  fi
+}
+
+cmd_here() {
+  local toplevel branch repo_name main_dir
+  toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || die "Not in a git repository"
+  branch=$(git branch --show-current 2>/dev/null || echo "detached")
+  repo_name=$(get_repo_name)
+  main_dir=$(get_main_repo_dir)
+
+  local is_main="false"
+  local worktree_name=""
+
+  if [[ "$toplevel" == "$main_dir" ]]; then
+    is_main="true"
+    worktree_name="main"
+  else
+    local dir_name
+    dir_name=$(basename "$toplevel")
+    if [[ "$dir_name" == "${repo_name}${SEPARATOR}"* ]]; then
+      worktree_name="${dir_name#${repo_name}${SEPARATOR}}"
+    fi
+  fi
+
+  if [[ "$JSON_OUTPUT" == "true" ]]; then
+    echo "{\"path\": \"$toplevel\", \"branch\": \"$branch\", \"is_main\": $is_main, \"name\": \"$worktree_name\"}"
+  else
+    echo "Repository: $repo_name"
+    echo "Branch: $branch"
+    echo "Path: $toplevel"
+    if [[ "$is_main" == "true" ]]; then
+      echo "Type: main repository"
+    else
+      echo "Type: worktree ($worktree_name)"
+    fi
+  fi
+}
+
+cmd_switch() {
+  local search="${1:-}"
+
+  [[ -z "$search" ]] && die "Usage: gwt switch <branch>"
+
+  local path
+  # Special case: "main" refers to the main repo
+  if [[ "$search" == "main" ]]; then
+    path=$(get_main_repo_dir)
+  else
+    path=$(find_worktree_by_branch "$search")
+  fi
+
+  if [[ -z "$path" ]]; then
+    die "No worktree found matching: $search"
+  fi
+
+  local cmd="cd $path && claude"
+  echo "$cmd" | pbcopy
+
+  success "Copied to clipboard!"
+  echo ""
+  echo "Paste and run to start a new Claude session in the worktree:"
+  echo -e "  ${BLUE}$cmd${NC}"
+}
+
+cmd_help() {
+  cat << EOF
+gwt - Git Worktree Manager v$VERSION
+
+Usage: gwt <command> [options] [arguments]
+
+Commands:
+  new <branch> [from]   Create worktree from branch (or create new branch)
+  ls                    List worktrees for current repo
+  go <branch>           Output path (use: cd \$(gwt go feat))
+  path <branch>         Alias for 'go'
+  switch <branch>       Copy "cd <path> && claude" to clipboard for new session
+  rm <branch>           Remove worktree and optionally branch
+  here                  Show current worktree info
+  help                  Show this help
+
+Options:
+  --json                Machine-readable JSON output
+  --no-env              Skip copying .env files on new
+  --keep-branch         Don't delete branch on rm
+
+Examples:
+  gwt new feat/auth           Create worktree for feat/auth branch
+  gwt new fix-bug main        Create fix-bug from main branch
+  cd \$(gwt go auth)           Switch to worktree matching 'auth'
+  gwt switch auth             Copy switch command to clipboard
+  gwt ls --json               List worktrees as JSON
+  gwt rm auth --keep-branch   Remove worktree but keep branch
+EOF
+}
+
+#
+# Main
+#
+
+main() {
+  # Parse global flags
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json)
+        JSON_OUTPUT=true
+        shift
+        ;;
+      --no-env)
+        COPY_ENV=false
+        shift
+        ;;
+      --keep-branch)
+        KEEP_BRANCH=true
+        shift
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  # Restore args
+  set -- "${args[@]}"
+
+  local cmd="${1:-help}"
+  shift || true
+
+  # Ensure we're in a git repo (except for help)
+  if [[ "$cmd" != "help" ]]; then
+    git rev-parse --git-dir &>/dev/null || die "Not in a git repository"
+  fi
+
+  case "$cmd" in
+    new)
+      cmd_new "$@"
+      ;;
+    ls|list)
+      cmd_ls "$@"
+      ;;
+    go|cd)
+      cmd_go "$@"
+      ;;
+    path)
+      cmd_path "$@"
+      ;;
+    rm|remove)
+      cmd_rm "$@"
+      ;;
+    switch)
+      cmd_switch "$@"
+      ;;
+    here|info)
+      cmd_here "$@"
+      ;;
+    help|--help|-h)
+      cmd_help
+      ;;
+    version|--version|-v)
+      echo "gwt v$VERSION"
+      ;;
+    *)
+      die "Unknown command: $cmd. Run 'gwt help' for usage."
+      ;;
+  esac
+}
+
+main "$@"
