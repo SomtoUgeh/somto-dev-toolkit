@@ -5,9 +5,9 @@ description: |
   "interview me about requirements", "define stories", "write a spec", "break down
   feature into tasks", "create implementation plan", "help me scope this feature",
   "what questions should I answer", or discusses feature planning. Covers the PRD
-  interview process, spec structure, story atomization, and phased workflow from
-  idea to implementable stories.
-version: 1.0.0
+  interview process, spec structure, story atomization, and 4-phase workflow from
+  idea to Dex tasks.
+version: 2.0.0
 ---
 
 # PRD Workflow - Feature Planning
@@ -25,21 +25,16 @@ implementable stories through structured interview, research, and specification.
 - Need thorough requirements gathering
 - Want AI-assisted research and review
 
-## The Phased Approach
-
-The PRD workflow progresses through six phases:
+## The 4-Phase Approach
 
 | Phase | Name | Purpose |
 |-------|------|---------|
 | 1 | Input Classification | Identify feature name and type |
-| 2 | Deep Interview | Gather requirements through questions |
-| 2.5 | Research | **Parallel background agents** (codebase, external, git history) |
-| 3 | Spec Write | Create comprehensive specification |
-| 3.5 | Review Gate | **Parallel background reviewers** |
-| 4-6 | PRD Generation | Create atomic stories, prepare for implementation |
+| 2 | Interview + Exploration | Gather requirements while research/expert agents run in parallel |
+| 3 | Spec Write | Create specification with Implementation Stories section |
+| 4 | Dex Handoff | Parse stories into Dex tasks |
 
-**Key:** Phases 2.5 and 3.5 use `run_in_background: true` for non-blocking execution.
-See **`background-agents`** skill for patterns.
+**Key Change:** Research and expert agents now run during interview (Phase 2), not after the spec. This produces better specs from the start.
 
 ## Starting the Workflow
 
@@ -49,50 +44,104 @@ See **`background-agents`** skill for patterns.
 /prd                                     # Interactive discovery
 ```
 
-## Interview Philosophy
+## Phase 2: Interview + Exploration
 
-**"Be annoyingly thorough."**
+**Commitment:** "I will ask 8-10+ questions covering: core problem, success criteria, MVP scope, technical constraints, UX flows, edge cases, error states, and tradeoffs."
 
-**Commitment:** Before starting, declare: "I will ask 8-10+ questions covering: core problem, success criteria, MVP scope, technical constraints, UX flows, edge cases, error states, and tradeoffs."
+### Wave 1 (3-4 questions)
+Core problem, success criteria, MVP scope.
 
-The interview phase asks 8-15 questions across multiple waves:
+After Wave 1, spawn ALL agents in parallel with `run_in_background: true`:
 
-- **Wave 1** (3-4 questions): Core problem, success criteria, MVP scope
-- **Research break**: Parallel agents gather context
-- **Waves 2-5**: Technical details, UX, edge cases, tradeoffs
+**Research Agents:**
+- `prd-codebase-researcher` - Existing patterns, files to modify
+- `git-history-analyzer` - Prior attempts, why patterns evolved
+- `prd-external-researcher` - Best practices, code examples
 
-Focus on **non-obvious** details - edge cases, error states, and tradeoffs that
-will bite during implementation.
+**Expert Agents (inform spec early):**
+- `architecture-strategist` - System design concerns
+- `security-sentinel` - Auth, data exposure risks
+- `spec-flow-analyzer` - User journeys, missing flows
+- `pattern-recognition-specialist` - Codebase consistency
 
-## Output Structure
+### Waves 2-5
+Continue interview, incorporate agent findings as they complete.
 
-The workflow produces two files in `plans/<feature>/`:
+Focus on **non-obvious** details - edge cases, error states, and tradeoffs that will bite during implementation.
 
-```
-plans/auth-feature/
-├── spec.md        # Comprehensive specification
-└── prd.json       # Atomic stories with embedded progress log
+## Phase 3: Spec Structure
+
+Write to `plans/<feature>/spec.md` with this structure:
+
+```markdown
+# <Feature> Specification
+
+## Overview
+## Problem Statement
+## Success Criteria
+## User Stories
+## Detailed Requirements
+## Technical Design
+## Edge Cases & Error Handling
+## Open Questions
+## Out of Scope
+
+## Implementation Stories
+
+### Story 1: <Title>
+**Category:** functional|ui|integration|edge-case|performance
+**Skills:** <skill-name>, <skill-name>
+**Blocked by:** none
+**Acceptance Criteria:**
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+## Research Findings
+## Expert Review Findings
 ```
 
 ## Story Atomization Rules
 
-**Commitment:** "Each story will have ≤7 steps, touch ≤3 files, be independently testable, and have no 'and' in title."
+**Commitment:** "Each story will have ≤7 acceptance criteria, touch ≤3 files, be independently testable, and have no 'and' in title."
 
-Each story must be completable in ONE iteration (~15-30 min):
+Each story must be completable in ONE task (~15-30 min):
 
-- **Max 7 verification steps** - If more, split the story
+- **Max 7 acceptance criteria** - If more, split the story
 - **Max 3 files touched** - If more, consider splitting
 - **No "and" in title** - "User can X and Y" = two stories
 - **Independently testable** - Can verify in isolation
 - **Cleanly revertible** - Can undo without cascade
 
+## Phase 4: Dex Handoff
+
+Use `dex plan` to automatically create tasks from the spec:
+
+```bash
+dex plan plans/<feature>/spec.md
+```
+
+This automatically:
+- Creates parent task from spec title
+- Analyzes Implementation Stories section
+- Generates subtasks with proper hierarchy
+- Sets blocked-by relationships from "Blocked by:" lines
+
+Verify tasks created:
+```bash
+dex status
+dex list
+```
+
 ## After PRD Completion
 
-The workflow ends with a choice:
+Use Dex for execution:
 
-1. **Run `/go` now** - Start implementing immediately
-2. **Run `/go --once`** - Single iteration to test
-3. **Done** - Review PRD first, implement later
+```bash
+dex status              # Dashboard view
+dex list --ready        # See unblocked tasks
+dex start <id>          # Claim a task
+/complete <id>          # Run reviewers and complete
+```
 
 ## Command Reference
 
@@ -102,12 +151,8 @@ The workflow ends with a choice:
 /cancel-prd                   # Cancel in-progress PRD
 ```
 
-## Additional Resources
+## Related Commands
 
-### Related Skills
-
-- **`background-agents`** - Patterns for `run_in_background: true`, checking progress, retrieving results
-
-### Reference Files
-
-- **`references/story-schema.md`** - PRD JSON schema and examples
+- `/complete` - Complete task with reviewer workflow
+- `dex list` - View pending tasks
+- `dex sync` - Sync with GitHub issues

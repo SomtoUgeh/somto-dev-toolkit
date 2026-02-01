@@ -6,53 +6,70 @@ description: |
   coverage", "/ut command", or discusses unit testing strategies. Covers the
   unit test loop workflow, React Testing Library best practices, query
   priorities, and coverage improvement strategies.
-version: 1.0.0
+version: 2.0.0
 ---
 
 # Unit Test Loop - Coverage Improvement
 
 **Current branch:** !`git branch --show-current 2>/dev/null || echo "not in git repo"`
 
-The unit test loop systematically improves test coverage through iterative,
-focused test writing with mandatory quality reviews.
+The unit test loop uses a 2-phase workflow with Dex task tracking for
+persistent, cross-session test coverage improvement.
 
-## State Management
+## The 2-Phase Approach
 
-**Single Source of Truth**: `.claude/ut-state-{session}.json` stores all state including
-the embedded progress log. No separate progress.txt file.
+| Phase | Name | Purpose |
+|-------|------|---------|
+| 1 | Coverage Analysis | Identify gaps, prioritize files |
+| 2 | Dex Handoff | Create epic + tasks from analysis |
 
-**What Hook Updates:**
-- Appends to state.json's `log` array automatically
-- Iteration markers are optional (hook auto-detects from git)
-
-## When to Use Unit Test Loop
-
-- Need to improve overall test coverage
-- Adding tests to untested code
-- TDD workflow for new features
-- Coverage metrics are below target
+After Phase 2, use `/complete <task-id>` for each test task.
 
 ## Starting the Loop
 
 ```bash
-/ut "Improve coverage for auth module"                    # Basic
-/ut "Add tests" --target 80%                              # With target
-/ut "Cover utils" --test-command "npm run test:unit"      # Custom command
+/ut "Improve coverage for auth module"            # Basic
+/ut "Add tests" --target 80%                      # With target
 ```
 
-## Iteration Workflow
+## Phase 1: Coverage Analysis
 
-Each iteration follows this exact sequence:
+1. Run coverage command to see current state
+2. Identify files with low coverage
+3. Prioritize 3-7 test tasks for user-facing behavior
 
-1. **Run coverage** - Identify files with low coverage
-2. **Find ONE gap** - Focus on user-facing behavior, not implementation
-3. **Write ONE test** - Validate real user behavior
-4. **Run linters** - Ensure code quality
-5. **Verify improvement** - Run coverage again
-6. **Run reviewers** - code-simplifier + kieran reviewer with `run_in_background: true` (MANDATORY)
-7. **Commit** - `test(<file>): describe behavior`
+**Output:** `<phase_complete phase="1"/>`
 
-**Tip:** Background reviewers let you continue work while they run. See **`background-agents`** skill.
+## Phase 2: Dex Handoff
+
+Create Dex epic with target, then tasks for each gap:
+
+```bash
+# Create epic
+dex create "Unit Test Coverage" --description "Target: 80% coverage"
+
+# For each gap
+dex create "Test: login validation" --parent <epic-id> --description "
+File: src/auth/login.ts
+Current: 45%
+
+Test should verify:
+- [ ] Valid credentials succeed
+- [ ] Invalid credentials show error
+"
+```
+
+**Output:** `<phase_complete phase="2"/>` or `<promise>UT SETUP COMPLETE</promise>`
+
+## Working on Tasks
+
+Use Dex + /complete workflow:
+
+```bash
+dex list --pending      # See what's ready
+dex start <id>          # Start working
+/complete <id>          # Run reviewers and complete
+```
 
 ## React Testing Library Patterns
 
@@ -94,69 +111,24 @@ expect(button).toBeDisabled()  // Not: expect(button.disabled).toBe(true)
 await screen.findByText('Loaded')  // Not: act(() => ...)
 ```
 
-## Commitment Protocol
-
-Before each iteration, **declare completion criteria**:
-
-```
-"This iteration is complete when:
-- ONE test validates [specific behavior]
-- Test passes, coverage improved
-- Reviewers addressed
-- Committed"
-```
-
 ## Quality Standards
 
-- **ONE test per iteration** - Focused, reviewable commits
+- **ONE test per task** - Focused, reviewable commits
 - **User-facing behavior only** - Test what users depend on
 - **Quality over quantity** - One great test beats ten shallow ones
 - **No coverage gaming** - Use `/* v8 ignore */` for untestable code
 
-## Completion
-
-Output when coverage target reached:
-
-```xml
-<promise>COVERAGE COMPLETE</promise>
-```
-
-Only output when genuinely complete - do not exit prematurely.
-
-## Task Integration (Optional)
-
-### On Coverage Analysis Complete
-
-For each file below target coverage:
-```
-TaskCreate({
-  subject: "Test: {filename} ({current}% → {target}%)",
-  description: "Improve coverage for {full_path}",
-  activeForm: "Testing {filename}",
-  metadata: { loop: "ut", file_path: "{path}", current: {N}, target: {M} }
-})
-```
-
-### On File Coverage Met
-
-`TaskUpdate(task_id, status: "completed")`
-
-### Dynamic Discovery
-
-When new files are found during iteration, create additional Tasks.
-
 ## Command Reference
 
 ```bash
-/ut "prompt"                                    # Basic loop
-/ut "prompt" --target 80%                       # With target
-/ut "prompt" --max-iterations 10               # Limit iterations
-/ut "prompt" --test-command "yarn test:unit"   # Custom test command
-/cancel-ut                                      # Cancel loop
+/ut "prompt"                  # Start analysis
+/ut "prompt" --target 80%     # With target
+/cancel-ut                    # Cancel loop
+/complete <task-id>           # Complete task with reviewers
 ```
 
-## Additional Resources
+## Related
 
-### Related Skills
-
-- **`background-agents`** - Patterns for `run_in_background: true`, parallel reviewers
+- `/complete` - Run reviewers and mark Dex task complete
+- `dex list` - View pending tasks
+- `dex-workflow` skill - Full Dex usage patterns

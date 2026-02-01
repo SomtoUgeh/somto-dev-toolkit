@@ -9,22 +9,21 @@ Personal collection of Claude Code tools and skills.
 /plugin install somto-dev-toolkit@somto-dev-toolkit
 ```
 
-## Commands (15)
+## Commands (13)
 
 ### Loop Commands
 
 | Command | Description |
 |---------|-------------|
-| `/go` | Iterative task loop (generic or PRD-aware) |
-| `/prd` | Deep interview to build PRD for features |
-| `/ut` | Unit test coverage improvement loop |
-| `/e2e` | Playwright E2E test development loop |
+| `/prd` | Deep interview to build PRD for features (4 phases, Dex integration) |
+| `/complete` | Run reviewers and mark Dex task complete |
+| `/ut` | Unit test coverage (2 phases, Dex integration) |
+| `/e2e` | Playwright E2E tests (2 phases, Dex integration) |
 
 ### Control Commands
 
 | Command | Description |
 |---------|-------------|
-| `/cancel-go` | Cancel active go loop |
 | `/cancel-prd` | Cancel active PRD loop |
 | `/cancel-ut` | Cancel active unit test loop |
 | `/cancel-e2e` | Cancel active E2E test loop |
@@ -33,7 +32,6 @@ Personal collection of Claude Code tools and skills.
 
 | Command | Description |
 |---------|-------------|
-| `/go-help` | Help for the go loop command |
 | `/ut-help` | Explain the unit test loop technique |
 | `/e2e-help` | Explain the E2E test loop technique |
 
@@ -47,29 +45,33 @@ Personal collection of Claude Code tools and skills.
 | `/gwt` | Manage git worktrees using sibling directories |
 | `/setup-gwt` | Install the gwt script |
 
-## Agents (3)
+## Agents (2)
 
 | Agent | Description |
 |-------|-------------|
 | `prd-codebase-researcher` | Research codebase patterns for PRD development |
 | `prd-external-researcher` | Research external best practices using Exa |
-| `prd-complexity-estimator` | Estimate iteration counts for /go loops |
 
-## Skills (4)
+## Skills (9)
 
 | Skill | Description |
 |-------|-------------|
+| `dex-workflow` | Task-based feature implementation with Dex |
+| `prd-workflow` | PRD generation with 4-phase workflow |
+| `unit-test-loop` | Unit test coverage with Dex tracking |
+| `e2e-test-loop` | Playwright E2E tests with Dex tracking |
 | `blog-post-writer` | Transform brain dumps into polished blog posts |
 | `technical-svg-diagrams` | Generate clean, minimal SVG diagrams |
 | `biome-gritql` | GritQL patterns for Biome linting |
 | `gwt` | Git worktree management using sibling directories |
+| `background-agents` | Patterns for parallel background agents |
 
 ## Hooks (6)
 
 | Event | Purpose |
 |-------|---------|
 | `SessionStart` | Initialize session state |
-| `Stop` | Enforce iterative workflows (go/ut/e2e/prd loops) |
+| `Stop` | Enforce iterative workflows (ut/e2e/prd loops) |
 | `SubagentStop` | Validate research agent outputs |
 | `PreToolUse` | Git safety guard + memory injection (requires qmd) |
 | `UserPromptSubmit` | Fork suggestion for similar past sessions (requires qmd) |
@@ -79,19 +81,32 @@ Personal collection of Claude Code tools and skills.
 ### PRD-based Development
 ```
 /prd "add user authentication"
-# Interview process generates spec + PRD
-# Then run the go loop:
-/go plans/auth/prd.json
+# Interview process generates spec with Implementation Stories
+# Phase 4 creates Dex tasks automatically
+
+# Work on tasks:
+dex list --pending
+/complete <task-id>
 ```
 
 ### Unit Test Coverage
 ```
 /ut "improve coverage for auth module" --target 80%
+# Phase 1: Coverage analysis, identify gaps
+# Phase 2: Create Dex tasks for each gap
+# Work on tasks:
+dex list --pending
+/complete <task-id>
 ```
 
 ### E2E Testing
 ```
 /e2e "add checkout flow tests"
+# Phase 1: Flow analysis, identify critical paths
+# Phase 2: Create Dex tasks per flow
+# Work on tasks:
+dex list --pending
+/complete <task-id>
 ```
 
 ### Git Safety Guard
@@ -127,9 +142,9 @@ Once configured:
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| macOS | ✅ Full | launchd for scheduling |
-| Linux | ✅ Full | cron for scheduling |
-| WSL | ✅ Full | cron (ensure `sudo service cron start`) |
+| macOS | Full | launchd for scheduling |
+| Linux | Full | cron for scheduling |
+| WSL | Full | cron (ensure `sudo service cron start`) |
 
 ## License
 

@@ -61,17 +61,13 @@ fi
 # Branch setup - prompt user if on main/master (now that we have FEATURE_NAME)
 prompt_feature_branch "feat/$FEATURE_NAME"
 
-# Pre-compute expected paths (convention-based discovery)
-# NOTE: progress.txt removed - log is now embedded in prd.json
+# Pre-compute expected paths
 EXPECTED_SPEC="plans/$FEATURE_NAME/spec.md"
-EXPECTED_PRD="plans/$FEATURE_NAME/prd.json"
 
-# Create state file with phase 1
-# NOTE: progress_path removed - log is embedded in prd.json
+# Create state file with phase 1 (simplified for 4-phase workflow)
 cat > "$STATE_FILE" <<EOF
 ---
 loop_type: "prd"
-mode: "prd"
 active: true
 feature_name: "$FEATURE_NAME"
 current_phase: "1"
@@ -79,18 +75,11 @@ input_type: "$INPUT_TYPE"
 input_path: "$INPUT_PATH"
 input_raw: "$INPUT"
 spec_path: "$EXPECTED_SPEC"
-prd_path: "$EXPECTED_PRD"
 interview_questions: 0
-interview_wave: 1
-max_iterations: 0
-reviews_complete: false
-gate_status: "pending"
-review_count: 0
 phase_iteration: 0
 working_branch: "$WORKING_BRANCH"
 branch_setup_done: true
 started_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-task_list_synced: false
 ---
 
 # PRD Loop: Phase 1 - Input Classification
@@ -210,6 +199,12 @@ State file: $STATE_FILE
 
 The stop hook is now active. Complete each phase and output the
 appropriate marker to advance to the next phase.
+
+Phases:
+  1. Input Classification
+  2. Interview + Exploration (research + expert agents)
+  3. Spec Write (with Implementation Stories section)
+  4. Dex Handoff (create tasks from stories)
 
 Current phase: 1 - Input Classification
 EOF

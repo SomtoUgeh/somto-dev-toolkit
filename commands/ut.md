@@ -1,7 +1,7 @@
 ---
 name: ut
-description: "Start unit test coverage improvement loop"
-argument-hint: "PROMPT [--target N%] [--max-iterations N] [--test-command 'cmd'] [--completion-promise 'text']"
+description: "Unit test coverage improvement with Dex tracking"
+argument-hint: "PROMPT [--target N%]"
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-ut-loop.sh:*)
 hide-from-slash-command-tool: "true"
@@ -9,15 +9,13 @@ hide-from-slash-command-tool: "true"
 
 # Unit Test Loop
 
-Execute the setup script to initialize the unit test loop:
+Execute the setup script to initialize:
 
 ```!
 "${CLAUDE_PLUGIN_ROOT}/scripts/setup-ut-loop.sh" $ARGUMENTS
 ```
 
-You are now in a unit test coverage improvement loop.
-
-Please work on the task. When you try to exit, the unit test loop will feed the same PROMPT back to you for the next iteration. You'll see your previous work in files and git history, allowing you to iterate and improve.
+You are now in a 2-phase unit test workflow. The stop hook advances you through phases.
 
 ---
 
@@ -28,99 +26,103 @@ When starting on main/master, the setup script prompts:
 2. If yes, prompts for branch name (default: `test/unit-coverage`)
 3. Creates branch before loop starts
 
-This happens in bash before Claude starts working.
-
 ---
 
 ## Structured Output Control Flow
 
-The stop hook uses **markers as signals, with git-based fallback detection**. If you complete the work but forget a marker, the hook can detect test commits and auto-advance.
-
-### Marker Summary
-
-| Step | Marker | Status | Fallback |
-|------|--------|--------|----------|
-| 1 | `<reviews_complete/>` | Required | **None** (quality gate) |
-| 2 | `<iteration_complete test_file="..."/>` | Optional | Auto-detects from git log if test commit exists |
-| 3 | `<promise>TEXT</promise>` | Required | None (explicit exit signal) |
-
-**State Management**: State is stored in `.claude/ut-state-{session}.json` (single source of truth). Progress log is embedded - no separate progress.txt.
-
-### Exact Marker Formats
-
-```xml
-<!-- After running reviewers (REQUIRED - no fallback) -->
-<reviews_complete/>
-
-<!-- After committing (include actual test file path) -->
-<iteration_complete test_file="src/components/Button.test.tsx"/>
-
-<!-- When coverage target reached -->
-<promise>COVERAGE COMPLETE</promise>
-```
-
-### Detection Priority
-
-1. **Markers are explicit signals** - Take precedence when present
-2. **Git fallback for iteration** - If `test(` commit exists but marker missing, auto-advances
-3. **Reviews always required** - No fallback (quality gate)
-4. **Last marker wins** - If examples appear in docs, only LAST occurrence counts
+| Phase | Name | Required Marker | Next Phase |
+|-------|------|-----------------|------------|
+| 1 | Coverage Analysis | `<phase_complete phase="1"/>` | 2 |
+| 2 | Dex Handoff | `<phase_complete phase="2"/>` | done |
 
 ---
 
-## Your Task
+## Phase 1: Coverage Analysis
 
-Each iteration, you must:
+**Goal:** Identify files with low coverage and create prioritized test tasks.
 
-1. **Run coverage** to identify files with low coverage
-2. **Find ONE important gap** - focus on user-facing features, not implementation details
-3. **Write ONE meaningful test** that validates real user behavior
-4. **Run lint, format, and typecheck** the equivalent command in the codebase to ensure code quality
-5. **Run coverage again** to verify improvement
-6. **[MANDATORY] Run reviewers IN PARALLEL (background optional)** - In ONE message, spawn multiple Task calls with `run_in_background: true`:
-   ```
-   Task 1: subagent_type="pr-review-toolkit:code-simplifier" (max_turns: 15, run_in_background: true)
-   Task 2: subagent_type="<kieran-reviewer-for-language>" (max_turns: 20, run_in_background: true)
-   ```
-   Kieran reviewers:
-   - TypeScript/JavaScript: `compound-engineering:review:kieran-typescript-reviewer`
-   - Python: `compound-engineering:review:kieran-python-reviewer`
-   - Database/migrations: `compound-engineering:review:data-integrity-guardian`
+1. **Run coverage** command to see current state
+2. **Identify gaps** - Focus on:
+   - Files with <80% coverage (or target from args)
+   - User-facing behavior, not implementation details
+   - Code paths that could break user workflows
 
-   Check progress: `/tasks` or `Ctrl+T`. Retrieve with `TaskOutput` → address ALL findings.
-7. **[MANDATORY] Output reviews marker** after addressing all findings:
-   ```
-   <reviews_complete/>
-   ```
-9. **Commit** with message: `test(<file>): <describe behavior>`
-10. **Output iteration marker** (optional - hook auto-detects from git):
-    ```
-    <iteration_complete test_file="path/to/test.ts"/>
-    ```
+3. **Create prioritized list** of 3-7 test tasks, each covering ONE specific behavior
 
-**Hook handles automatically:** Logs to state.json (don't touch it)
+**Output:** `<phase_complete phase="1"/>`
 
-⚠️ The stop hook ENFORCES steps 6-8. You cannot advance without `<reviews_complete/>` marker.
+---
 
-## Commitment Protocol
+## Phase 2: Dex Handoff
 
-**Before each iteration, declare your completion criteria:**
+Create Dex epic with target, then individual tasks.
 
-```
-"This iteration is complete when:
-- ONE test written that validates [specific user-facing behavior]
-- Test passes
-- Coverage improved for [target file]
-- Lint/typecheck pass
-- Reviewers addressed
-- Committed with test(<file>): message"
+**Steps:**
+
+1. Create epic with target in description:
+```bash
+dex create "Unit Test Coverage" -d "Target: N% coverage for [scope]
+
+Current: X%
+Goal: Y%"
 ```
 
-**Work until ALL declared criteria are verified.** Do not emit `<iteration_complete>` until you've checked each criterion.
+2. For each identified gap, create a task:
+```bash
+dex create "Test: [specific behavior]" --parent <epic-id> -d "
+File: path/to/file.ts
+Current coverage: X%
 
-## Quality Expectations
+Test should verify:
+- [ ] Specific behavior 1
+- [ ] Edge case handling
 
-Treat ALL code as production code. No shortcuts, no "good enough for now". Every line you write will be maintained, extended, and debugged by others. Fight entropy.
+Query: RTL getByRole, test user-visible behavior
+"
+```
+
+3. Set dependencies if needed:
+```bash
+dex edit <task2-id> --add-blocker <task1-id>
+```
+
+4. Confirm:
+```bash
+dex list
+```
+
+5. Use AskUserQuestion:
+"Coverage tasks created:
+- Epic: Unit Test Coverage (target: N%)
+- <N> tasks ready
+
+What next?"
+
+Options:
+- **Start first task** - Begin implementation
+- **Done** - Review tasks first
+
+**Output:** `<phase_complete phase="2"/>` or `<promise>UT SETUP COMPLETE</promise>`
+
+---
+
+## Working on Tasks
+
+Use Dex + /complete workflow:
+
+```bash
+dex list --pending      # See what's ready
+dex start <id>          # Start working
+/complete <id>          # Run reviewers and complete
+```
+
+Each task iteration:
+1. Write ONE meaningful test
+2. Run lint, format, typecheck
+3. Run coverage to verify improvement
+4. `/complete <id>` runs reviewers, commits, marks done
+
+---
 
 ## React Testing Library Guidelines
 
@@ -133,32 +135,23 @@ Treat ALL code as production code. No shortcuts, no "good enough for now". Every
 4. `getByText` - non-interactive elements
 5. `getByTestId` - **last resort only**
 
-### Query Types
-- `getBy`/`getAllBy` - element exists (throws if not found)
-- `queryBy`/`queryAllBy` - **only** for asserting absence
-- `findBy`/`findAllBy` - async elements (returns Promise)
-
 ### Best Practices
 - **Use `screen`** - `screen.getByRole('button')` not destructuring render
 - **Use `userEvent.setup()`** - more realistic than `fireEvent`
 - **Use jest-dom matchers** - `toBeDisabled()` not `expect(el.disabled).toBe(true)`
-- **Avoid `act()`** - RTL handles it; use `findBy` or `waitFor` for async
 - **Test behavior, not implementation** - what users see/do, not internal state
 
-## Critical Rules
+---
 
-- **ONE test per iteration** - focused, reviewable commits
-- **User-facing behavior only** - test what users depend on, not implementation details
-- **Quality over quantity** - a great test catches regressions users would notice
-- **No coverage gaming** - if code isn't worth testing, use `/* v8 ignore */` instead
-- **Ensure code quality** - Run lint, format, and typecheck before committing
+## Quality Expectations
 
-## Completion
+- **ONE test per task** - focused, reviewable commits
+- **User-facing behavior only** - test what users depend on
+- **Quality over quantity** - great tests catch regressions users would notice
+- **No coverage gaming** - if code isn't worth testing, use `/* v8 ignore */`
 
-When the coverage target is reached (or you've covered all meaningful user-facing behavior), output:
+---
 
-```
-<promise>COVERAGE COMPLETE</promise>
-```
+## Cancellation
 
-IMPORTANT: Only output this promise when it's genuinely true. Do not lie to exit the loop.
+To cancel: `/cancel-ut` or `rm .claude/ut-loop-*.local.md`

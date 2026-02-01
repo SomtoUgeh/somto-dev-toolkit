@@ -6,53 +6,84 @@ description: |
   tests for UI", "page object pattern", "/e2e command", or discusses automated
   browser testing. Covers the E2E test loop workflow, Playwright patterns, page
   objects, and selector strategies.
-version: 1.0.0
+version: 2.0.0
 ---
 
 # E2E Test Loop - Browser Automation Testing
 
 **Current branch:** !`git branch --show-current 2>/dev/null || echo "not in git repo"`
 
-The E2E test loop systematically adds end-to-end tests for user flows using
-Playwright, with page objects for maintainable test code.
+The E2E test loop uses a 2-phase workflow with Dex task tracking for
+persistent, cross-session browser test development.
 
-## State Management
+## The 2-Phase Approach
 
-**Single Source of Truth**: `.claude/e2e-state-{session}.json` stores all state including
-the embedded progress log. No separate progress.txt file.
+| Phase | Name | Purpose |
+|-------|------|---------|
+| 1 | Flow Analysis | Identify critical user flows |
+| 2 | Dex Handoff | Create epic + tasks per flow |
 
-**What Hook Updates:**
-- Appends to state.json's `log` array automatically
-- Iteration markers are optional (hook auto-detects from git)
-
-## When to Use E2E Test Loop
-
-- Need to test critical user flows
-- Adding browser automation tests
-- Ensuring features work end-to-end
-- Integration testing across components
+After Phase 2, use `/complete <task-id>` for each E2E test task.
 
 ## Starting the Loop
 
 ```bash
-/e2e "Cover checkout flow"                           # Basic
-/e2e "Test auth" --max-iterations 5                  # Limited
-/e2e "Add E2E" --test-command "npx playwright test"  # Custom command
+/e2e "Cover checkout flow"            # Basic
+/e2e "Test auth and settings flows"   # Multiple flows
 ```
 
-## Iteration Workflow
+## Phase 1: Flow Analysis
 
-Each iteration follows this sequence:
+1. Analyze application routes, features, user journeys
+2. Identify critical flows needing E2E coverage
+3. Prioritize 3-7 test tasks
 
-1. **Identify flow** - Find user flow lacking E2E coverage
-2. **Create page object** - `*.e2e.page.ts` for reusable locators/actions
-3. **Write ONE test** - `*.e2e.ts` using page objects
-4. **Run linters** - Ensure code quality
-5. **Verify passing** - Run the E2E test
-6. **Run reviewers** - code-simplifier + kieran reviewer with `run_in_background: true` (MANDATORY)
-7. **Commit** - `test(e2e): describe user flow`
+Focus on:
+- Happy paths users depend on
+- Payment/auth/data submission flows
+- Flows that broke in production
 
-**Tip:** Background reviewers let you continue work while they run. See **`background-agents`** skill.
+**Output:** `<phase_complete phase="1"/>`
+
+## Phase 2: Dex Handoff
+
+Create Dex epic, then tasks for each flow:
+
+```bash
+# Create epic
+dex create "E2E Test Coverage" --description "Critical user flow coverage"
+
+# For each flow
+dex create "E2E: checkout flow" --parent <epic-id> --description "
+Flow: Browse → Cart → Checkout → Confirmation
+
+Steps:
+1. Add product to cart
+2. Proceed to checkout
+3. Fill payment form
+4. Complete purchase
+
+Files:
+- e2e/checkout.e2e.page.ts
+- e2e/checkout.e2e.ts
+
+Acceptance:
+- [ ] Page object with semantic locators
+- [ ] Test covers happy path
+"
+```
+
+**Output:** `<phase_complete phase="2"/>` or `<promise>E2E SETUP COMPLETE</promise>`
+
+## Working on Tasks
+
+Use Dex + /complete workflow:
+
+```bash
+dex list --pending      # See what's ready
+dex start <id>          # Start working
+/complete <id>          # Run reviewers and complete
+```
 
 ## File Naming Convention
 
@@ -120,70 +151,23 @@ await expect(page.getByText('Loaded')).toBeVisible()
 await page.waitForResponse('**/api/data')
 ```
 
-## Commitment Protocol
-
-Before each iteration, **declare completion criteria**:
-
-```
-"This iteration is complete when:
-- ONE E2E test validates [specific flow]
-- Page object created if needed
-- Test passes, reviewers addressed
-- Committed"
-```
-
 ## Quality Standards
 
-- **ONE test per iteration** - Focused, reviewable commits
+- **ONE test per task** - Focused, reviewable commits
 - **Test user-visible behavior** - Not implementation details
 - **Tests must be independent** - No shared state between tests
 - **Use page objects** - Keep test files concise
 
-## Completion
-
-Output when critical user flows are covered:
-
-```xml
-<promise>E2E COMPLETE</promise>
-```
-
-Only output when genuinely complete - do not exit prematurely.
-
-## Task Integration (Optional)
-
-### On Flow Identification
-
-For each user flow to test:
-```
-TaskCreate({
-  subject: "E2E: {flow_name}",
-  description: "Test: {flow_description}",
-  activeForm: "Testing {flow_name} flow",
-  metadata: { loop: "e2e", flow_name: "{name}" }
-})
-```
-
-Set `blockedBy` for dependent flows (checkout depends on login).
-
-### On Flow Test Complete
-
-`TaskUpdate(task_id, status: "completed")`
-
 ## Command Reference
 
 ```bash
-/e2e "prompt"                                      # Basic loop
-/e2e "prompt" --max-iterations 10                  # Limit iterations
-/e2e "prompt" --test-command "npx playwright test" # Custom command
-/cancel-e2e                                        # Cancel loop
+/e2e "prompt"             # Start flow analysis
+/cancel-e2e               # Cancel loop
+/complete <task-id>       # Complete task with reviewers
 ```
 
-## Additional Resources
+## Related
 
-### Related Skills
-
-- **`background-agents`** - Patterns for `run_in_background: true`, parallel reviewers
-
-### Reference Files
-
-- **`references/playwright-patterns.md`** - Advanced Playwright patterns
+- `/complete` - Run reviewers and mark Dex task complete
+- `dex list` - View pending tasks
+- `dex-workflow` skill - Full Dex usage patterns
